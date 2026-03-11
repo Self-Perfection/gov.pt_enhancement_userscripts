@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.3
+// @version      1.4
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -12,6 +12,7 @@
 // @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
 // @changelog    1.2 - Исправлен невалидный ключ dataset (дефисы → camelCase)
 // @changelog    1.3 - WeakSet вместо dataset для отслеживания обработанных карточек
+// @changelog    1.4 - Отключение MutationObserver после обработки всех карточек
 // ==/UserScript==
 
 (function () {
@@ -100,7 +101,8 @@
 
   const processed = new WeakSet();
 
-  function tryProcess() {
+  // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
+  const observer = new MutationObserver(() => {
     const cards = document.querySelectorAll('.a-CardView-body');
     for (const cardBody of cards) {
       if (processed.has(cardBody)) continue;
@@ -110,12 +112,10 @@
       processed.add(cardBody);
       processCard(cardBody);
     }
-  }
-
-  // Пробуем сразу (вдруг данные уже есть)
-  tryProcess();
-
-  // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
-  const observer = new MutationObserver(tryProcess);
+    // Все карточки обработаны — observer больше не нужен
+    if (cards.length > 0 && [...cards].every(c => processed.has(c))) {
+      observer.disconnect();
+    }
+  });
   observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
