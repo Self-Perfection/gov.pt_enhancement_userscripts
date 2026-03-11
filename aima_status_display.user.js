@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.2
+// @version      1.3
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -11,6 +11,7 @@
 // @changelog    1.0 - Начальная версия: отображение числового статуса заявки в карточке
 // @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
 // @changelog    1.2 - Исправлен невалидный ключ dataset (дефисы → camelCase)
+// @changelog    1.3 - WeakSet вместо dataset для отслеживания обработанных карточек
 // ==/UserScript==
 
 (function () {
@@ -97,16 +98,16 @@
     }
   }
 
-  const MARKER = 'aimaStatusProcessed';
+  const processed = new WeakSet();
 
   function tryProcess() {
     const cards = document.querySelectorAll('.a-CardView-body');
     for (const cardBody of cards) {
-      if (cardBody.dataset[MARKER]) continue;
+      if (processed.has(cardBody)) continue;
       // Ждём пока внутри карточки появится ссылка — признак загруженных данных
       const link = cardBody.querySelector('.a-CardView-subContent a');
       if (!link) continue;
-      cardBody.dataset[MARKER] = '1';
+      processed.add(cardBody);
       processCard(cardBody);
     }
   }
