@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.0
+// @version      1.1
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -9,6 +9,7 @@
 // @grant        none
 // @downloadURL  https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/main/aima_status_display.user.js
 // @changelog    1.0 - Начальная версия: отображение числового статуса заявки в карточке
+// @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
 // ==/UserScript==
 
 (function () {
@@ -60,13 +61,7 @@
     el.style.color = '#dc3545';
   }
 
-  async function run() {
-    const subContent = document.querySelector('.a-CardView-subContent');
-    if (!subContent) return;
-
-    const cardBody = subContent.closest('.a-CardView-body');
-    if (!cardBody) return;
-
+  async function processCard(cardBody) {
     const statusEl = createStatusElement();
     cardBody.appendChild(statusEl);
 
@@ -78,8 +73,8 @@
       return;
     }
 
-    // Ищем ссылку на страницу validar
-    const link = document.querySelector('.a-CardView-subContent a');
+    // Ищем ссылку на страницу validar внутри карточки
+    const link = cardBody.querySelector('.a-CardView-subContent a');
     if (!link) {
       showError(statusEl, 'Ссылка на форму не найдена');
       return;
@@ -101,9 +96,24 @@
     }
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', run);
-  } else {
-    run();
+  const MARKER = 'aima-status-processed';
+
+  function tryProcess() {
+    const cards = document.querySelectorAll('.a-CardView-body');
+    for (const cardBody of cards) {
+      if (cardBody.dataset[MARKER]) continue;
+      // Ждём пока внутри карточки появится ссылка — признак загруженных данных
+      const link = cardBody.querySelector('.a-CardView-subContent a');
+      if (!link) continue;
+      cardBody.dataset[MARKER] = '1';
+      processCard(cardBody);
+    }
   }
+
+  // Пробуем сразу (вдруг данные уже есть)
+  tryProcess();
+
+  // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
+  const observer = new MutationObserver(tryProcess);
+  observer.observe(document.documentElement, { childList: true, subtree: true });
 })();
