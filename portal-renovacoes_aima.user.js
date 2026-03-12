@@ -7,7 +7,7 @@
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
 // @icon         https://portal-renovacoes.aima.gov.pt/ords/r/aima/200/files/static/v59/icons/app-icon-192.png
 // @grant        none
-// @downloadURL  https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/main/portal-renovacoes.aima.user.js
+// @downloadURL  https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/main/portal-renovacoes_aima.user.js
 // @changelog    1.0 - Начальная версия: отображение числового статуса заявки в карточке
 // @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
 // @changelog    1.2 - Исправлен невалидный ключ dataset (дефисы → camelCase)
