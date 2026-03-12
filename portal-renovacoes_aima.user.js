@@ -69,7 +69,7 @@
 
     // Кнопка закрытия
     const closeBtn = document.createElement('button');
-    closeBtn.textContent = '\u00d7';
+    closeBtn.textContent = '×';
     closeBtn.style.cssText =
       'position:absolute; top:8px; right:12px; border:none; background:none;' +
       'font-size:20px; cursor:pointer; color:#666; line-height:1;';
@@ -91,12 +91,12 @@
       row.appendChild(numSpan);
 
       const labelSpan = document.createElement('span');
-      labelSpan.textContent = ' \u2014 ' + STATUS_LABELS[code];
+      labelSpan.textContent = ' — ' + STATUS_LABELS[code];
       row.appendChild(labelSpan);
 
       if (code === statusValue) {
         const marker = document.createElement('span');
-        marker.textContent = '  \u25c0 \u0432\u044b \u0437\u0434\u0435\u0441\u044c';
+        marker.textContent = '  ◀ вы здесь';
         marker.style.cssText = 'color:#0d6efd; font-weight:bold;';
         row.appendChild(marker);
       }
@@ -106,7 +106,7 @@
 
     if (!STATUS_FLOW.includes(statusValue)) {
       const note = document.createElement('div');
-      note.textContent = '\u0412\u0430\u0448 \u0441\u0442\u0430\u0442\u0443\u0441 ' + statusValue + ' \u043d\u0435 \u0432\u0445\u043e\u0434\u0438\u0442 \u0432 \u0442\u0438\u043f\u0438\u0447\u043d\u0443\u044e \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c.';
+      note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность.';
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
       dialog.appendChild(note);
     }
@@ -116,20 +116,20 @@
     const sourceLink = document.createElement('a');
     sourceLink.href = 'https://t.me/aimairn/43114/134298';
     sourceLink.target = '_blank';
-    sourceLink.textContent = '\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a';
+    sourceLink.textContent = 'Источник';
     sourceLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
     footer.appendChild(sourceLink);
     footer.appendChild(document.createElement('br'));
 
-    const contactText = document.createTextNode('\u0415\u0441\u043b\u0438 \u0443 \u0432\u0430\u0441 \u043d\u0435\u0441\u0442\u0430\u043d\u0434\u0430\u0440\u0442\u043d\u044b\u0439 \u0441\u0442\u0430\u0442\u0443\u0441, \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u0432 ');
+    const contactText = document.createTextNode('Если у вас нестандартный статус, напишите в ');
     footer.appendChild(contactText);
     const chatLink = document.createElement('a');
     chatLink.href = 'https://t.me/aimairn/43114/134298';
     chatLink.target = '_blank';
-    chatLink.textContent = '\u0447\u0430\u0442\u0435';
+    chatLink.textContent = 'чате';
     chatLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
     footer.appendChild(chatLink);
-    footer.appendChild(document.createTextNode(', \u0442\u0435\u0433\u043d\u0443\u0432 '));
+    footer.appendChild(document.createTextNode(', тегнув '));
     const selfLink = document.createElement('a');
     selfLink.href = 'https://t.me/Self_Perfection';
     selfLink.target = '_blank';
