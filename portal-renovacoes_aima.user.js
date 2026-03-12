@@ -139,6 +139,10 @@
     dialog.appendChild(footer);
   }
 
+  // BUG: кнопка "?" вызывает уведомление от сайта:
+  // «Ocorreu 1 erro — A sua sessão terminou.»
+  // Вероятно, APEX перехватывает submit от <button> внутри формы.
+  // TODO: попробовать type="button" или заменить на <span> с role="button".
   function createHelpButton(statusValue) {
     const btn = document.createElement('button');
     btn.textContent = '?';
