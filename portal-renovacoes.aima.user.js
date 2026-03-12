@@ -39,17 +39,47 @@
   // Типичная последовательность статусов
   const STATUS_FLOW = [1, 5, 14, 15, 6];
 
-  function createHelpPopup(statusValue) {
-    const popup = document.createElement('div');
-    popup.style.cssText =
-      'display:none; position:absolute; z-index:9999; background:#fff; border:1px solid #ccc;' +
-      'border-radius:8px; padding:12px 16px; box-shadow:0 4px 12px rgba(0,0,0,0.15);' +
-      'font-size:13px; line-height:1.6; min-width:280px; max-width:360px; color:#333;';
+  let helpDialog = null;
+
+  function getHelpDialog() {
+    if (helpDialog) return helpDialog;
+
+    const style = document.createElement('style');
+    style.textContent =
+      '.aima-help-dialog::backdrop { background: rgba(0,0,0,0.3); }' +
+      '.aima-help-dialog { border:1px solid #ccc; border-radius:8px; padding:12px 16px;' +
+      'box-shadow:0 4px 12px rgba(0,0,0,0.15); font-size:13px; line-height:1.6;' +
+      'min-width:280px; max-width:360px; color:#333; }';
+    document.head.appendChild(style);
+
+    helpDialog = document.createElement('dialog');
+    helpDialog.className = 'aima-help-dialog';
+
+    // Закрытие по клику на backdrop
+    helpDialog.addEventListener('click', (e) => {
+      if (e.target === helpDialog) helpDialog.close();
+    });
+
+    document.body.appendChild(helpDialog);
+    return helpDialog;
+  }
+
+  function fillHelpDialog(dialog, statusValue) {
+    dialog.innerHTML = '';
+
+    // Кнопка закрытия
+    const closeBtn = document.createElement('button');
+    closeBtn.textContent = '\u00d7';
+    closeBtn.style.cssText =
+      'position:absolute; top:8px; right:12px; border:none; background:none;' +
+      'font-size:20px; cursor:pointer; color:#666; line-height:1;';
+    closeBtn.addEventListener('click', () => dialog.close());
+    dialog.appendChild(closeBtn);
 
     const title = document.createElement('div');
     title.textContent = 'Типичная последовательность статусов:';
     title.style.cssText = 'font-weight:bold; margin-bottom:8px;';
-    popup.appendChild(title);
+    dialog.appendChild(title);
 
     const list = document.createElement('div');
     list.style.cssText = 'margin-bottom:8px;';
@@ -61,24 +91,24 @@
       row.appendChild(numSpan);
 
       const labelSpan = document.createElement('span');
-      labelSpan.textContent = ' — ' + STATUS_LABELS[code];
+      labelSpan.textContent = ' \u2014 ' + STATUS_LABELS[code];
       row.appendChild(labelSpan);
 
       if (code === statusValue) {
         const marker = document.createElement('span');
-        marker.textContent = '  ◀ вы здесь';
+        marker.textContent = '  \u25c0 \u0432\u044b \u0437\u0434\u0435\u0441\u044c';
         marker.style.cssText = 'color:#0d6efd; font-weight:bold;';
         row.appendChild(marker);
       }
       list.appendChild(row);
     }
-    popup.appendChild(list);
+    dialog.appendChild(list);
 
     if (!STATUS_FLOW.includes(statusValue)) {
       const note = document.createElement('div');
-      note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность.';
+      note.textContent = '\u0412\u0430\u0448 \u0441\u0442\u0430\u0442\u0443\u0441 ' + statusValue + ' \u043d\u0435 \u0432\u0445\u043e\u0434\u0438\u0442 \u0432 \u0442\u0438\u043f\u0438\u0447\u043d\u0443\u044e \u043f\u043e\u0441\u043b\u0435\u0434\u043e\u0432\u0430\u0442\u0435\u043b\u044c\u043d\u043e\u0441\u0442\u044c.';
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
-      popup.appendChild(note);
+      dialog.appendChild(note);
     }
 
     const footer = document.createElement('div');
@@ -86,59 +116,45 @@
     const sourceLink = document.createElement('a');
     sourceLink.href = 'https://t.me/aimairn/43114/134298';
     sourceLink.target = '_blank';
-    sourceLink.textContent = 'Источник';
+    sourceLink.textContent = '\u0418\u0441\u0442\u043e\u0447\u043d\u0438\u043a';
     sourceLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
     footer.appendChild(sourceLink);
     footer.appendChild(document.createElement('br'));
 
-    const contactText = document.createTextNode('Если у вас нестандартный статус, напишите в ');
+    const contactText = document.createTextNode('\u0415\u0441\u043b\u0438 \u0443 \u0432\u0430\u0441 \u043d\u0435\u0441\u0442\u0430\u043d\u0434\u0430\u0440\u0442\u043d\u044b\u0439 \u0441\u0442\u0430\u0442\u0443\u0441, \u043d\u0430\u043f\u0438\u0448\u0438\u0442\u0435 \u0432 ');
     footer.appendChild(contactText);
     const chatLink = document.createElement('a');
     chatLink.href = 'https://t.me/aimairn/43114/134298';
     chatLink.target = '_blank';
-    chatLink.textContent = 'чате';
+    chatLink.textContent = '\u0447\u0430\u0442\u0435';
     chatLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
     footer.appendChild(chatLink);
-    footer.appendChild(document.createTextNode(', тегнув '));
+    footer.appendChild(document.createTextNode(', \u0442\u0435\u0433\u043d\u0443\u0432 '));
     const selfLink = document.createElement('a');
     selfLink.href = 'https://t.me/Self_Perfection';
     selfLink.target = '_blank';
     selfLink.textContent = '@Self_Perfection';
     selfLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
     footer.appendChild(selfLink);
-    popup.appendChild(footer);
-
-    return popup;
+    dialog.appendChild(footer);
   }
 
   function createHelpButton(statusValue) {
-    const wrapper = document.createElement('span');
-    wrapper.style.cssText = 'position:relative; display:inline-block; vertical-align:middle;';
-
     const btn = document.createElement('button');
     btn.textContent = '?';
-    btn.title = 'Справка о статусах';
+    btn.title = '\u0421\u043f\u0440\u0430\u0432\u043a\u0430 \u043e \u0441\u0442\u0430\u0442\u0443\u0441\u0430\u0445';
     btn.style.cssText =
       'cursor:pointer; border:none; background:#6c757d; color:#fff; border-radius:50%;' +
       'width:20px; height:20px; font-size:12px; margin-left:6px; vertical-align:middle;' +
       'line-height:20px; text-align:center; padding:0;';
 
-    const popup = createHelpPopup(statusValue);
-    wrapper.appendChild(btn);
-    wrapper.appendChild(popup);
-
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      popup.style.display = popup.style.display === 'none' ? 'block' : 'none';
+    btn.addEventListener('click', () => {
+      const dialog = getHelpDialog();
+      fillHelpDialog(dialog, statusValue);
+      dialog.showModal();
     });
 
-    document.addEventListener('click', (e) => {
-      if (!wrapper.contains(e.target)) {
-        popup.style.display = 'none';
-      }
-    });
-
-    return wrapper;
+    return btn;
   }
 
   function updateStatusElement(el, statusValue) {
