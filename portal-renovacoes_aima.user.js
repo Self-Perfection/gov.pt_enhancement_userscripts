@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.6
+// @version      1.6.1
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -23,8 +23,10 @@
   const STATUS_LABELS = {
     1: 'Регистрация',
     5: 'Заявка передана сотруднику',
+    11: 'Внутренняя проверка',
     14: 'Внутренняя проверка',
     15: 'Финальный анализ',
+    20: '?',
     6: 'Одобрение',
   };
 
@@ -70,7 +72,7 @@
   }
 
   // Типичная последовательность статусов
-  const STATUS_FLOW = [1, 5, 14, 15, 6];
+  const STATUS_FLOW = [1, 5, 11, 14, 15, 20, 6];
 
   let helpDialog = null;
 
@@ -137,6 +139,11 @@
     }
     dialog.appendChild(list);
 
+    const note11 = document.createElement('div');
+    note11.style.cssText = 'font-size:12px; color:#666; margin-bottom:8px; font-style:italic;';
+    note11.textContent = 'Статус 11 может появляться после 5 и иногда возвращаться.';
+    dialog.appendChild(note11);
+
     if (!STATUS_FLOW.includes(statusValue)) {
       const note = document.createElement('div');
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
@@ -147,12 +154,20 @@
 
     const footer = document.createElement('div');
     footer.style.cssText = 'font-size:12px; color:#666; border-top:1px solid #eee; padding-top:8px; margin-top:4px;';
-    const sourceLink = document.createElement('a');
-    sourceLink.href = 'https://t.me/aimairn/43114/134298';
-    sourceLink.target = '_blank';
-    sourceLink.textContent = 'Источник';
-    sourceLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
-    footer.appendChild(sourceLink);
+    const linkStyle = 'color:#0d6efd; text-decoration:underline;';
+    const sourceLink1 = document.createElement('a');
+    sourceLink1.href = 'https://t.me/aimairn/43114/134298';
+    sourceLink1.target = '_blank';
+    sourceLink1.textContent = 'Источник 1';
+    sourceLink1.style.cssText = linkStyle;
+    footer.appendChild(sourceLink1);
+    footer.appendChild(document.createTextNode(', '));
+    const sourceLink2 = document.createElement('a');
+    sourceLink2.href = 'https://t.me/aimairn/43114/136559';
+    sourceLink2.target = '_blank';
+    sourceLink2.textContent = 'Источник 2';
+    sourceLink2.style.cssText = linkStyle;
+    footer.appendChild(sourceLink2);
     footer.appendChild(document.createElement('br'));
 
     footer.appendChild(document.createTextNode('Если у вас нестандартный статус, расскажите '));
