@@ -28,7 +28,7 @@
     6: 'Одобрение',
   };
 
-  const EXPECTED_ESTADO_ID = 'P73_ESTADO_1';
+  const EXPECTED_ESTADO_ID = 'P72_ESTADO_1';
   const REPORT_URL = 'https://t.me/aimairn/43114/135777';
 
   function findEstadoElement(root) {
@@ -42,13 +42,22 @@
     return null;
   }
 
-  function createReportLink(text) {
-    const a = document.createElement('a');
-    a.href = REPORT_URL;
-    a.target = '_blank';
-    a.textContent = text;
-    a.style.cssText = 'color:#0d6efd; text-decoration:underline;';
-    return a;
+  function appendReportCTA(parent) {
+    const linkStyle = 'color:#0d6efd; text-decoration:underline;';
+    parent.appendChild(document.createTextNode('в чате реплаем на '));
+    const announce = document.createElement('a');
+    announce.href = REPORT_URL;
+    announce.target = '_blank';
+    announce.textContent = 'анонс юзерскрипта';
+    announce.style.cssText = linkStyle;
+    parent.appendChild(announce);
+    parent.appendChild(document.createTextNode(' или тегните '));
+    const self = document.createElement('a');
+    self.href = 'https://t.me/Self_Perfection';
+    self.target = '_blank';
+    self.textContent = '@Self_Perfection';
+    self.style.cssText = linkStyle;
+    parent.appendChild(self);
   }
 
   function createStatusElement() {
@@ -132,7 +141,7 @@
       const note = document.createElement('div');
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
       note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность. Расскажите об этом ';
-      note.appendChild(createReportLink('в чате'));
+      appendReportCTA(note);
       dialog.appendChild(note);
     }
 
@@ -147,7 +156,7 @@
     footer.appendChild(document.createElement('br'));
 
     footer.appendChild(document.createTextNode('Если у вас нестандартный статус, расскажите '));
-    footer.appendChild(createReportLink('в чате'));
+    appendReportCTA(footer);
     dialog.appendChild(footer);
   }
 
@@ -212,7 +221,7 @@
         const msg = document.createElement('span');
         msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
         msg.style.color = '#dc3545';
-        msg.appendChild(createReportLink('в чате'));
+        appendReportCTA(msg);
         statusEl.textContent = '';
         statusEl.appendChild(msg);
         return;
@@ -223,7 +232,7 @@
         const warn = document.createElement('div');
         warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
         warn.textContent = 'Найден нестандартный ID: ' + result.foundId + '. Расскажите об этом ';
-        warn.appendChild(createReportLink('в чате'));
+        appendReportCTA(warn);
         statusEl.appendChild(warn);
       }
     }
