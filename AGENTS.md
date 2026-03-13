@@ -24,3 +24,9 @@
   * Формат markdown: `[Установить ИМЯ_СКРИПТА vX.X](https://raw.githubusercontent.com/...)`
   * Пример: `[Установить Infopedia Cross-Dictionary Links v1.7](https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/claude/fix-infopedia-mobile-layout-01VsVJXNCfMrzveEsHBHF7ay/infopedia_cross_dictionary_links.user.js)`
   * Эта ссылка позволяет протестировать изменения до мержа в main
+
+# Информация по отдельным userscripts
+
+## portal-renovacoes_aima.user.js
+
+@research_portal-renovacoes.aima.md
