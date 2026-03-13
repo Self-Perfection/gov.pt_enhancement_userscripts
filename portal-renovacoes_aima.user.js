@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.5
+// @version      1.6
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -14,6 +14,7 @@
 // @changelog    1.3 - WeakSet вместо dataset для отслеживания обработанных карточек
 // @changelog    1.4 - Отключение MutationObserver после обработки всех карточек
 // @changelog    1.5 - Добавлена кнопка (?) со справкой о статусах
+// @changelog    1.6 - Fallback поиск элемента статуса по паттерну, улучшены сообщения об ошибках
 // ==/UserScript==
 
 (function () {
@@ -26,6 +27,29 @@
     15: 'Финальный анализ',
     6: 'Одобрение',
   };
+
+  const EXPECTED_ESTADO_ID = 'P73_ESTADO_1';
+  const REPORT_URL = 'https://t.me/aimairn/43114/135777';
+
+  function findEstadoElement(root) {
+    const primary = root.getElementById(EXPECTED_ESTADO_ID);
+    if (primary) return { el: primary, fallback: false };
+    const all = root.querySelectorAll('[id]');
+    const re = /^P\d+_ESTADO_\d+$/;
+    for (const el of all) {
+      if (re.test(el.id)) return { el, fallback: true, foundId: el.id };
+    }
+    return null;
+  }
+
+  function createReportLink(text) {
+    const a = document.createElement('a');
+    a.href = REPORT_URL;
+    a.target = '_blank';
+    a.textContent = text;
+    a.style.cssText = 'color:#0d6efd; text-decoration:underline;';
+    return a;
+  }
 
   function createStatusElement() {
     const div = document.createElement('div');
@@ -106,8 +130,9 @@
 
     if (!STATUS_FLOW.includes(statusValue)) {
       const note = document.createElement('div');
-      note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность.';
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
+      note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность. Расскажите об этом ';
+      note.appendChild(createReportLink('в чате'));
       dialog.appendChild(note);
     }
 
@@ -121,21 +146,8 @@
     footer.appendChild(sourceLink);
     footer.appendChild(document.createElement('br'));
 
-    const contactText = document.createTextNode('Если у вас нестандартный статус, напишите в ');
-    footer.appendChild(contactText);
-    const chatLink = document.createElement('a');
-    chatLink.href = 'https://t.me/aimairn/43114/134298';
-    chatLink.target = '_blank';
-    chatLink.textContent = 'чате';
-    chatLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
-    footer.appendChild(chatLink);
-    footer.appendChild(document.createTextNode(', тегнув '));
-    const selfLink = document.createElement('a');
-    selfLink.href = 'https://t.me/Self_Perfection';
-    selfLink.target = '_blank';
-    selfLink.textContent = '@Self_Perfection';
-    selfLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
-    footer.appendChild(selfLink);
+    footer.appendChild(document.createTextNode('Если у вас нестандартный статус, расскажите '));
+    footer.appendChild(createReportLink('в чате'));
     dialog.appendChild(footer);
   }
 
@@ -195,11 +207,31 @@
     const statusEl = createStatusElement();
     cardBody.appendChild(statusEl);
 
-    // Попытка найти элемент на текущей странице
-    const localEl = document.getElementById('P72_ESTADO_1');
-    if (localEl) {
-      const val = Number(localEl.getAttribute('data-return-value'));
+    function handleResult(result) {
+      if (!result) {
+        const msg = document.createElement('span');
+        msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
+        msg.style.color = '#dc3545';
+        msg.appendChild(createReportLink('в чате'));
+        statusEl.textContent = '';
+        statusEl.appendChild(msg);
+        return;
+      }
+      const val = Number(result.el.getAttribute('data-return-value'));
       updateStatusElement(statusEl, val);
+      if (result.fallback) {
+        const warn = document.createElement('div');
+        warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
+        warn.textContent = 'Найден нестандартный ID: ' + result.foundId + '. Расскажите об этом ';
+        warn.appendChild(createReportLink('в чате'));
+        statusEl.appendChild(warn);
+      }
+    }
+
+    // Попытка найти элемент на текущей странице
+    const localResult = findEstadoElement(document);
+    if (localResult) {
+      handleResult(localResult);
       return;
     }
 
@@ -214,13 +246,7 @@
       const response = await fetch(link.href, { credentials: 'include' });
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
-      const remoteEl = doc.getElementById('P72_ESTADO_1');
-      if (remoteEl) {
-        const val = Number(remoteEl.getAttribute('data-return-value'));
-        updateStatusElement(statusEl, val);
-      } else {
-        showError(statusEl, 'Элемент статуса не найден на странице формы');
-      }
+      handleResult(findEstadoElement(doc));
     } catch (e) {
       showError(statusEl, 'Ошибка загрузки: ' + e.message);
     }
