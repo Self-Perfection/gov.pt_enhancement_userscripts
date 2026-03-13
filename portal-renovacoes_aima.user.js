@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.6.2
+// @version      1.6.3
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -49,15 +49,36 @@
       ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
+  function buildHistoryText(history) {
+    return history.map(entry => {
+      const label = STATUS_LABELS[entry.s] || '?';
+      return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
+    }).join('\n');
+  }
+
   function renderHistory(parentEl) {
     const history = getHistory();
     if (history.length === 0) return;
     const container = document.createElement('div');
     container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
-    const title = document.createElement('div');
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex; align-items:center; margin-bottom:2px;';
+    const title = document.createElement('span');
     title.textContent = 'История изменений:';
-    title.style.cssText = 'font-weight:bold; margin-bottom:2px;';
-    container.appendChild(title);
+    title.style.fontWeight = 'bold';
+    header.appendChild(title);
+    const copyBtn = document.createElement('span');
+    copyBtn.textContent = '📋';
+    copyBtn.title = 'Копировать историю';
+    copyBtn.style.cssText = 'cursor:pointer; margin-left:6px; font-size:14px; user-select:none;';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(buildHistoryText(history)).then(() => {
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      });
+    });
+    header.appendChild(copyBtn);
+    container.appendChild(header);
     for (const entry of history) {
       const row = document.createElement('div');
       const label = STATUS_LABELS[entry.s] || '?';
