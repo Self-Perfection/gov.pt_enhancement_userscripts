@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.6.1
+// @version      1.6.2
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
 // @icon         https://portal-renovacoes.aima.gov.pt/ords/r/aima/200/files/static/v59/icons/app-icon-192.png
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @downloadURL  https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/main/portal-renovacoes_aima.user.js
 // @changelog    1.0 - Начальная версия: отображение числового статуса заявки в карточке
 // @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
@@ -29,6 +30,42 @@
     20: '?',
     6: 'Одобрение',
   };
+
+  function getHistory() {
+    return JSON.parse(GM_getValue('status_history', '[]'));
+  }
+
+  function recordStatus(statusValue) {
+    const history = getHistory();
+    if (history.length > 0 && history[history.length - 1].s === statusValue) return;
+    history.push({ s: statusValue, t: Date.now() });
+    GM_setValue('status_history', JSON.stringify(history));
+  }
+
+  function formatTimestamp(ts) {
+    const d = new Date(ts);
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function renderHistory(parentEl) {
+    const history = getHistory();
+    if (history.length === 0) return;
+    const container = document.createElement('div');
+    container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
+    const title = document.createElement('div');
+    title.textContent = 'История изменений:';
+    title.style.cssText = 'font-weight:bold; margin-bottom:2px;';
+    container.appendChild(title);
+    for (const entry of history) {
+      const row = document.createElement('div');
+      const label = STATUS_LABELS[entry.s] || '?';
+      row.textContent = formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
+      container.appendChild(row);
+    }
+    parentEl.appendChild(container);
+  }
 
   const EXPECTED_ESTADO_ID = 'P72_ESTADO_1';
   const REPORT_URL = 'https://t.me/aimairn/43114/135777';
@@ -243,6 +280,8 @@
       }
       const val = Number(result.el.getAttribute('data-return-value'));
       updateStatusElement(statusEl, val);
+      recordStatus(val);
+      renderHistory(statusEl);
       if (result.fallback) {
         const warn = document.createElement('div');
         warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
