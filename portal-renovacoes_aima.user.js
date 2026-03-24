@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.6
+// @version      1.7
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
 // @icon         https://portal-renovacoes.aima.gov.pt/ords/r/aima/200/files/static/v59/icons/app-icon-192.png
-// @grant        none
+// @grant        GM_getValue
+// @grant        GM_setValue
 // @downloadURL  https://raw.githubusercontent.com/Self-Perfection/gov.pt_enhancement_userscripts/refs/heads/main/portal-renovacoes_aima.user.js
 // @changelog    1.0 - Начальная версия: отображение числового статуса заявки в карточке
 // @changelog    1.1 - MutationObserver вместо DOMContentLoaded для ожидания загрузки данных APEX
@@ -15,6 +16,7 @@
 // @changelog    1.4 - Отключение MutationObserver после обработки всех карточек
 // @changelog    1.5 - Добавлена кнопка (?) со справкой о статусах
 // @changelog    1.6 - Fallback поиск элемента статуса по паттерну, улучшены сообщения об ошибках
+// @changelog    1.7 - Журнал изменений статусов с кнопкой копирования, обновлены статусы (добавлены 11, 20)
 // ==/UserScript==
 
 (function () {
@@ -23,10 +25,69 @@
   const STATUS_LABELS = {
     1: 'Регистрация',
     5: 'Заявка передана сотруднику',
+    11: 'Внутренняя проверка',
     14: 'Внутренняя проверка',
     15: 'Финальный анализ',
+    20: '?',
     6: 'Одобрение',
   };
+
+  function getHistory() {
+    return JSON.parse(GM_getValue('status_history', '[]'));
+  }
+
+  function recordStatus(statusValue) {
+    const history = getHistory();
+    if (history.length > 0 && history[history.length - 1].s === statusValue) return;
+    history.push({ s: statusValue, t: Date.now() });
+    GM_setValue('status_history', JSON.stringify(history));
+  }
+
+  function formatTimestamp(ts) {
+    const d = new Date(ts);
+    const pad = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+      ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+  }
+
+  function buildHistoryText(history) {
+    return history.map(entry => {
+      const label = STATUS_LABELS[entry.s] || '?';
+      return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
+    }).join('\n');
+  }
+
+  function renderHistory(parentEl) {
+    const history = getHistory();
+    if (history.length === 0) return;
+    const container = document.createElement('div');
+    container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
+    const header = document.createElement('div');
+    header.style.cssText = 'display:flex; align-items:center; margin-bottom:2px;';
+    const title = document.createElement('span');
+    title.textContent = 'История изменений:';
+    title.style.fontWeight = 'bold';
+    header.appendChild(title);
+    const copyBtn = document.createElement('span');
+    copyBtn.textContent = '📋';
+    copyBtn.title = 'Копировать историю';
+    copyBtn.style.cssText = 'cursor:pointer; margin-left:6px; font-size:14px; user-select:none;';
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(buildHistoryText(history)).then(() => {
+        copyBtn.textContent = '✓';
+        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
+      });
+    });
+    header.appendChild(copyBtn);
+    container.appendChild(header);
+    for (const entry of history) {
+      const row = document.createElement('div');
+      const label = STATUS_LABELS[entry.s] || '?';
+      row.textContent = formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
+      container.appendChild(row);
+    }
+    parentEl.appendChild(container);
+  }
 
   const EXPECTED_ESTADO_ID = 'P72_ESTADO_1';
   const REPORT_URL = 'https://t.me/aimairn/43114/135777';
@@ -70,7 +131,7 @@
   }
 
   // Типичная последовательность статусов
-  const STATUS_FLOW = [1, 5, 14, 15, 6];
+  const STATUS_FLOW = [1, 5, 11, 14, 15, 20, 6];
 
   let helpDialog = null;
 
@@ -137,6 +198,11 @@
     }
     dialog.appendChild(list);
 
+    const note11 = document.createElement('div');
+    note11.style.cssText = 'font-size:12px; color:#666; margin-bottom:8px; font-style:italic;';
+    note11.textContent = 'Статус 11 может появляться после 5 и иногда возвращаться.';
+    dialog.appendChild(note11);
+
     if (!STATUS_FLOW.includes(statusValue)) {
       const note = document.createElement('div');
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
@@ -147,12 +213,20 @@
 
     const footer = document.createElement('div');
     footer.style.cssText = 'font-size:12px; color:#666; border-top:1px solid #eee; padding-top:8px; margin-top:4px;';
-    const sourceLink = document.createElement('a');
-    sourceLink.href = 'https://t.me/aimairn/43114/134298';
-    sourceLink.target = '_blank';
-    sourceLink.textContent = 'Источник';
-    sourceLink.style.cssText = 'color:#0d6efd; text-decoration:underline;';
-    footer.appendChild(sourceLink);
+    const linkStyle = 'color:#0d6efd; text-decoration:underline;';
+    const sourceLink1 = document.createElement('a');
+    sourceLink1.href = 'https://t.me/aimairn/43114/134298';
+    sourceLink1.target = '_blank';
+    sourceLink1.textContent = 'Источник 1';
+    sourceLink1.style.cssText = linkStyle;
+    footer.appendChild(sourceLink1);
+    footer.appendChild(document.createTextNode(', '));
+    const sourceLink2 = document.createElement('a');
+    sourceLink2.href = 'https://t.me/aimairn/43114/136559';
+    sourceLink2.target = '_blank';
+    sourceLink2.textContent = 'Источник 2';
+    sourceLink2.style.cssText = linkStyle;
+    footer.appendChild(sourceLink2);
     footer.appendChild(document.createElement('br'));
 
     footer.appendChild(document.createTextNode('Если у вас нестандартный статус, расскажите '));
@@ -228,6 +302,8 @@
       }
       const val = Number(result.el.getAttribute('data-return-value'));
       updateStatusElement(statusEl, val);
+      recordStatus(val);
+      renderHistory(statusEl);
       if (result.fallback) {
         const warn = document.createElement('div');
         warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
