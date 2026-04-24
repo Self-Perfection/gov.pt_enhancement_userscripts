@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.7.2
+// @version      1.7.3
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -22,7 +22,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.7.2';
+  const SCRIPT_VERSION = '1.7.3';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -51,7 +51,6 @@
     return {
       scriptVersion: SCRIPT_VERSION,
       exportedAt: new Date().toISOString(),
-      url: location.href,
       userAgent: navigator.userAgent,
       statusHistory: getHistory(),
       debugLog,
@@ -378,9 +377,52 @@
     };
   }
 
-  async function processCard(cardBody) {
+  function urlPath(href) {
+    try { return new URL(href).pathname; } catch (e) { return null; }
+  }
+
+  function processCard(cardBody) {
     const statusEl = createStatusElement();
     cardBody.appendChild(statusEl);
+    renderIdle(statusEl, cardBody);
+  }
+
+  // Исходное состояние: статус автоматически не тянем, чтобы фоновый fetch
+  // (с clear=72) не ломал APEX-сессию и не триггерил «A sua sessão terminou.»
+  // на кнопке Recibo. Пользователь сам жмёт «Узнать статус», когда готов.
+  function renderIdle(statusEl, cardBody) {
+    statusEl.textContent = '';
+    statusEl.style.color = '';
+
+    const btn = document.createElement('span');
+    btn.textContent = 'Узнать статус';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.style.cssText =
+      'display:inline-block; cursor:pointer; padding:4px 10px; border-radius:4px; ' +
+      'background:#0d6efd; color:#fff; font-weight:bold; font-size:14px; user-select:none;';
+    const activate = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      loadStatus(statusEl, cardBody);
+    };
+    btn.addEventListener('click', activate);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') activate(e);
+    });
+    statusEl.appendChild(btn);
+
+    const note = document.createElement('div');
+    note.style.cssText = 'margin-top:4px; font-size:11px; color:#666;';
+    note.textContent = 'После нажатия кнопка «Recibo» может перестать работать до перезагрузки страницы.';
+    statusEl.appendChild(note);
+
+    renderHistory(statusEl);
+  }
+
+  async function loadStatus(statusEl, cardBody) {
+    statusEl.textContent = 'Загрузка статуса…';
+    statusEl.style.color = '#666';
 
     const debug = {
       ver: SCRIPT_VERSION,
@@ -416,7 +458,8 @@
       }
     }
 
-    // Попытка найти элемент на текущей странице
+    // Если элемент статуса уже есть в текущем документе — используем его,
+    // fetch не нужен, сессия не пострадает.
     const localResult = findEstadoElement(document);
     if (localResult) {
       debug.source = 'local';
@@ -424,7 +467,6 @@
       return;
     }
 
-    // Ищем ссылку на страницу validar внутри карточки
     const link = cardBody.querySelector('.a-CardView-subContent a');
     if (!link) {
       debug.source = 'no-link';
@@ -433,25 +475,17 @@
       return;
     }
 
-    // Гипотеза: параметр clear=72 сбрасывает APEX-сессию на странице validar,
-    // из-за чего потом на странице cidadao ломается кнопка «Recibo»
-    // («A sua sessão terminou.»). Пробуем без него.
-    let fetchUrl = link.href;
-    try {
-      const u = new URL(fetchUrl);
-      debug.hadClearParam = u.searchParams.has('clear');
-      u.searchParams.delete('clear');
-      fetchUrl = u.toString();
-    } catch (e) {
-      debug.urlParseError = String(e);
-    }
+    // Проверенный способ: запрашиваем validar как есть, включая clear=72.
+    // Это единственная найденная комбинация, при которой APEX отдаёт
+    // заполненный P72_ESTADO_1. Сторонний эффект — ротация сессии таба —
+    // пользователь принял явно, нажав на «Узнать статус».
     debug.source = 'fetch';
-    debug.fetchUrl = fetchUrl;
+    debug.fetchPath = urlPath(link.href);
 
     try {
-      const response = await fetch(fetchUrl, { credentials: 'include' });
+      const response = await fetch(link.href, { credentials: 'include' });
       debug.fetchStatus = response.status;
-      debug.fetchFinalUrl = response.url;
+      debug.fetchFinalPath = urlPath(response.url);
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       handleResult(findEstadoElement(doc));
