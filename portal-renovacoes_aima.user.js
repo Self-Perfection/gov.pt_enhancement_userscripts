@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.7
+// @version      1.7.1
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -21,6 +21,42 @@
 
 (function () {
   'use strict';
+
+  const SCRIPT_VERSION = '1.7.1';
+  const DEBUG_LOG_KEY = 'debug_log';
+  const DEBUG_LOG_MAX_ENTRIES = 200;
+
+  function logDebug(entry) {
+    let log;
+    try {
+      log = JSON.parse(GM_getValue(DEBUG_LOG_KEY, '[]'));
+      if (!Array.isArray(log)) log = [];
+    } catch (e) {
+      log = [];
+    }
+    log.push({ t: Date.now(), ...entry });
+    if (log.length > DEBUG_LOG_MAX_ENTRIES) {
+      log.splice(0, log.length - DEBUG_LOG_MAX_ENTRIES);
+    }
+    GM_setValue(DEBUG_LOG_KEY, JSON.stringify(log));
+  }
+
+  function buildDebugPayload() {
+    let debugLog;
+    try {
+      debugLog = JSON.parse(GM_getValue(DEBUG_LOG_KEY, '[]'));
+    } catch (e) {
+      debugLog = [];
+    }
+    return {
+      scriptVersion: SCRIPT_VERSION,
+      exportedAt: new Date().toISOString(),
+      url: location.href,
+      userAgent: navigator.userAgent,
+      statusHistory: getHistory(),
+      debugLog,
+    };
+  }
 
   const STATUS_LABELS = {
     1: 'Регистрация',
@@ -57,28 +93,55 @@
     }).join('\n');
   }
 
+  // Используем <span role="button"> чтобы APEX не перехватывал клик как submit формы
+  // (см. комментарий у createHelpButton — баг с «A sua sessão terminou»).
+  function createIconBtn(icon, titleText, onClick) {
+    const btn = document.createElement('span');
+    btn.textContent = icon;
+    btn.title = titleText;
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.style.cssText = 'cursor:pointer; margin-left:6px; font-size:14px; user-select:none;';
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onClick(btn);
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') handler(e);
+    });
+    return btn;
+  }
+
+  function flashOk(btn, original) {
+    btn.textContent = '✓';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  }
+
+  function createDebugCopyButton() {
+    return createIconBtn('🐞', 'Скопировать отладочную информацию', (btn) => {
+      const payload = JSON.stringify(buildDebugPayload(), null, 2);
+      navigator.clipboard.writeText(payload).then(() => flashOk(btn, '🐞'));
+    });
+  }
+
   function renderHistory(parentEl) {
     const history = getHistory();
-    if (history.length === 0) return;
     const container = document.createElement('div');
     container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
     const header = document.createElement('div');
     header.style.cssText = 'display:flex; align-items:center; margin-bottom:2px;';
     const title = document.createElement('span');
-    title.textContent = 'История изменений:';
+    title.textContent = history.length > 0 ? 'История изменений:' : 'Отладка:';
     title.style.fontWeight = 'bold';
     header.appendChild(title);
-    const copyBtn = document.createElement('span');
-    copyBtn.textContent = '📋';
-    copyBtn.title = 'Копировать историю';
-    copyBtn.style.cssText = 'cursor:pointer; margin-left:6px; font-size:14px; user-select:none;';
-    copyBtn.addEventListener('click', () => {
-      navigator.clipboard.writeText(buildHistoryText(history)).then(() => {
-        copyBtn.textContent = '✓';
-        setTimeout(() => { copyBtn.textContent = '📋'; }, 1500);
-      });
-    });
-    header.appendChild(copyBtn);
+    if (history.length > 0) {
+      header.appendChild(createIconBtn('📋', 'Копировать историю', (btn) => {
+        navigator.clipboard.writeText(buildHistoryText(history)).then(() => flashOk(btn, '📋'));
+      }));
+    }
+    header.appendChild(createDebugCopyButton());
     container.appendChild(header);
     for (const entry of history) {
       const row = document.createElement('div');
@@ -286,11 +349,45 @@
     el.style.color = '#dc3545';
   }
 
+  function collectBadgeInfo(cardBody) {
+    const cardItem = cardBody.closest('.a-CardView-item');
+    const badgeEl = cardItem && cardItem.querySelector('.a-CardView-badge');
+    if (!badgeEl) return null;
+    const className = badgeEl.className || '';
+    const numMatch = className.match(/t-Badge--(\d+)/);
+    return {
+      className,
+      title: badgeEl.getAttribute('title') || null,
+      label: (badgeEl.querySelector('.a-CardView-badgeLabel') || {}).textContent || null,
+      value: (badgeEl.querySelector('.a-CardView-badgeValue') || {}).textContent || null,
+      num: numMatch ? Number(numMatch[1]) : null,
+    };
+  }
+
+  function describeEstadoEl(el) {
+    if (!el) return null;
+    return {
+      id: el.id,
+      returnValue: el.getAttribute('data-return-value'),
+      value: el.value || null,
+    };
+  }
+
   async function processCard(cardBody) {
     const statusEl = createStatusElement();
     cardBody.appendChild(statusEl);
 
+    const debug = {
+      ver: SCRIPT_VERSION,
+      badge: collectBadgeInfo(cardBody),
+    };
+
     function handleResult(result) {
+      debug.estado = result ? describeEstadoEl(result.el) : null;
+      debug.fallback = result ? !!result.fallback : null;
+      if (result && result.fallback) debug.foundId = result.foundId;
+      logDebug(debug);
+
       if (!result) {
         const msg = document.createElement('span');
         msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
@@ -316,6 +413,7 @@
     // Попытка найти элемент на текущей странице
     const localResult = findEstadoElement(document);
     if (localResult) {
+      debug.source = 'local';
       handleResult(localResult);
       return;
     }
@@ -323,16 +421,37 @@
     // Ищем ссылку на страницу validar внутри карточки
     const link = cardBody.querySelector('.a-CardView-subContent a');
     if (!link) {
+      debug.source = 'no-link';
+      logDebug(debug);
       showError(statusEl, 'Ссылка на форму не найдена');
       return;
     }
 
+    // Гипотеза: параметр clear=72 сбрасывает APEX-сессию на странице validar,
+    // из-за чего потом на странице cidadao ломается кнопка «Recibo»
+    // («A sua sessão terminou.»). Пробуем без него.
+    let fetchUrl = link.href;
     try {
-      const response = await fetch(link.href, { credentials: 'include' });
+      const u = new URL(fetchUrl);
+      debug.hadClearParam = u.searchParams.has('clear');
+      u.searchParams.delete('clear');
+      fetchUrl = u.toString();
+    } catch (e) {
+      debug.urlParseError = String(e);
+    }
+    debug.source = 'fetch';
+    debug.fetchUrl = fetchUrl;
+
+    try {
+      const response = await fetch(fetchUrl, { credentials: 'include' });
+      debug.fetchStatus = response.status;
+      debug.fetchFinalUrl = response.url;
       const html = await response.text();
       const doc = new DOMParser().parseFromString(html, 'text/html');
       handleResult(findEstadoElement(doc));
     } catch (e) {
+      debug.fetchError = String(e);
+      logDebug(debug);
       showError(statusEl, 'Ошибка загрузки: ' + e.message);
     }
   }
