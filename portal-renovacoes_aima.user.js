@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.7.1
+// @version      1.7.2
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -22,7 +22,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.7.1';
+  const SCRIPT_VERSION = '1.7.2';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -345,8 +345,13 @@
   }
 
   function showError(el, message) {
-    el.textContent = message;
-    el.style.color = '#dc3545';
+    el.textContent = '';
+    el.style.color = '';
+    const msg = document.createElement('div');
+    msg.textContent = message;
+    msg.style.color = '#dc3545';
+    el.appendChild(msg);
+    renderHistory(el);
   }
 
   function collectBadgeInfo(cardBody) {
@@ -389,12 +394,13 @@
       logDebug(debug);
 
       if (!result) {
-        const msg = document.createElement('span');
+        statusEl.textContent = '';
+        const msg = document.createElement('div');
         msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
         msg.style.color = '#dc3545';
         appendReportCTA(msg);
-        statusEl.textContent = '';
         statusEl.appendChild(msg);
+        renderHistory(statusEl);
         return;
       }
       const val = Number(result.el.getAttribute('data-return-value'));
