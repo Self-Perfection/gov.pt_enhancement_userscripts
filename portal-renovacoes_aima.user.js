@@ -1,10 +1,11 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.8
-// @description  Показывает числовой статус заявки на продление ВНЖ на странице cidadao
+// @version      1.9
+// @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
+// @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/validar*
 // @icon         https://portal-renovacoes.aima.gov.pt/ords/r/aima/200/files/static/v59/icons/app-icon-192.png
 // @grant        GM_getValue
 // @grant        GM_setValue
@@ -18,12 +19,13 @@
 // @changelog    1.6 - Fallback поиск элемента статуса по паттерну, улучшены сообщения об ошибках
 // @changelog    1.7 - Журнал изменений статусов с кнопкой копирования, обновлены статусы (добавлены 11, 20)
 // @changelog    1.8 - Статус грузится по кнопке «Узнать статус» (фикс конфликта с Recibo); debug-лог с кнопкой копирования
+// @changelog    1.9 - Поддержка страницы Validação (анонимный доступ, без fetch и без риска для сессии)
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.8';
+  const SCRIPT_VERSION = '1.9';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -162,6 +164,25 @@
     const re = /^P\d+_ESTADO_\d+$/;
     for (const el of all) {
       if (re.test(el.id)) return { el, fallback: true, foundId: el.id };
+    }
+    return null;
+  }
+
+  // На Validação ищем тот же регион Pedido, в котором лежит P72_ESTADO_1.
+  // Если самого ESTADO нет — fallback по заголовку «Pedido» (берём только тот,
+  // у которого внутри есть поля формы — внешний wrapper-регион пропускаем).
+  function findPedidoRegionBody() {
+    const estadoContainer = document.getElementById('P72_ESTADO_1_CONTAINER');
+    if (estadoContainer) {
+      const body = estadoContainer.closest('.t-Region-body');
+      if (body) return body;
+    }
+    const headings = document.querySelectorAll('.t-Region-title');
+    for (const h of headings) {
+      if (h.textContent.trim() !== 'Pedido') continue;
+      const region = h.closest('.t-Region');
+      const body = region && region.querySelector('.t-Region-body');
+      if (body && body.querySelector('.t-Form-fieldContainer')) return body;
     }
     return null;
   }
@@ -497,23 +518,81 @@
     }
   }
 
-  const processed = new WeakSet();
+  function initCidadaoMode() {
+    const processed = new WeakSet();
 
-  // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
-  const observer = new MutationObserver(() => {
-    const cards = document.querySelectorAll('.a-CardView-body');
-    for (const cardBody of cards) {
-      if (processed.has(cardBody)) continue;
-      // Ждём пока внутри карточки появится ссылка — признак загруженных данных
-      const link = cardBody.querySelector('.a-CardView-subContent a');
-      if (!link) continue;
-      processed.add(cardBody);
-      processCard(cardBody);
+    // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
+    const observer = new MutationObserver(() => {
+      const cards = document.querySelectorAll('.a-CardView-body');
+      for (const cardBody of cards) {
+        if (processed.has(cardBody)) continue;
+        // Ждём пока внутри карточки появится ссылка — признак загруженных данных
+        const link = cardBody.querySelector('.a-CardView-subContent a');
+        if (!link) continue;
+        processed.add(cardBody);
+        processCard(cardBody);
+      }
+      // Все карточки обработаны — observer больше не нужен
+      if (cards.length > 0 && [...cards].every(c => processed.has(c))) {
+        observer.disconnect();
+      }
+    });
+    observer.observe(document.documentElement, { childList: true, subtree: true });
+  }
+
+  // Validação рендерится анонимно и P72_ESTADO_1 уже лежит в DOM на момент
+  // document-end — никакой fetch и никакой MutationObserver не нужны.
+  function initValidacaoMode() {
+    const result = findEstadoElement(document);
+    const debug = { ver: SCRIPT_VERSION, page: 'validacao' };
+    if (result) {
+      debug.estado = describeEstadoEl(result.el);
+      debug.fallback = !!result.fallback;
+      if (result.fallback) debug.foundId = result.foundId;
     }
-    // Все карточки обработаны — observer больше не нужен
-    if (cards.length > 0 && [...cards].every(c => processed.has(c))) {
-      observer.disconnect();
+    logDebug(debug);
+
+    const pedidoBody = findPedidoRegionBody();
+    if (!pedidoBody) return;
+
+    const container = document.createElement('div');
+    container.style.cssText =
+      'margin-bottom:16px; padding:10px 12px; background:#f8f9fa;' +
+      'border-radius:6px; border-left:3px solid #0d6efd;';
+
+    if (!result) {
+      const msg = document.createElement('div');
+      msg.style.color = '#dc3545';
+      msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
+      appendReportCTA(msg);
+      container.appendChild(msg);
+    } else {
+      const val = Number(result.el.getAttribute('data-return-value'));
+      recordStatus(val);
+
+      const statusEl = document.createElement('div');
+      updateStatusElement(statusEl, val);
+      container.appendChild(statusEl);
+
+      if (result.fallback) {
+        const warn = document.createElement('div');
+        warn.style.cssText =
+          'color:#856404; background:#fff3cd; padding:4px 8px;' +
+          'border-radius:4px; margin-top:6px; font-size:12px;';
+        warn.textContent = 'Найден нестандартный ID: ' + result.foundId + '. Расскажите об этом ';
+        appendReportCTA(warn);
+        container.appendChild(warn);
+      }
     }
-  });
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+    renderHistory(container);
+    pedidoBody.appendChild(container);
+  }
+
+  const path = location.pathname;
+  if (/\/validar(?:\/|$)/.test(path)) {
+    initValidacaoMode();
+  } else if (/\/cidadao(?:\/|$)/.test(path)) {
+    initCidadaoMode();
+  }
 })();
