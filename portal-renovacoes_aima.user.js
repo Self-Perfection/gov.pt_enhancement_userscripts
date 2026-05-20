@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.9
+// @version      2.0
 // @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -20,14 +20,24 @@
 // @changelog    1.7 - Журнал изменений статусов с кнопкой копирования, обновлены статусы (добавлены 11, 20)
 // @changelog    1.8 - Статус грузится по кнопке «Узнать статус» (фикс конфликта с Recibo); debug-лог с кнопкой копирования
 // @changelog    1.9 - Поддержка страницы Validação (анонимный доступ, без fetch и без риска для сессии)
+// @changelog    2.0 - История статусов с привязкой к человеку (для нескольких заявок в семье); кнопка справки «?» больше не роняет сессию (button → span); добавлены статусы 12, 13
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.9';
+  const SCRIPT_VERSION = '2.0';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
+
+  // История статусов теперь хранится с привязкой к человеку:
+  //   { "<personKey>": [ {s, t}, ... ], ... }
+  // personKey — стабильный идентификатор заявителя (NIF / номер титулу /
+  // процессу), либо токен из URL как fallback. Старый общий ключ
+  // status_history однократно мигрируется в бакет "(до обновления скрипта)".
+  const STORE_KEY = 'status_history_v2';
+  const LEGACY_KEY = 'status_history';
+  const LEGACY_BUCKET = '(до обновления скрипта)';
 
   function logDebug(entry) {
     let log;
@@ -55,7 +65,7 @@
       scriptVersion: SCRIPT_VERSION,
       exportedAt: new Date().toISOString(),
       userAgent: navigator.userAgent,
-      statusHistory: getHistory(),
+      statusHistory: getHistoryStore(),
       debugLog,
     };
   }
@@ -64,21 +74,190 @@
     1: 'Регистрация',
     5: 'Заявка передана сотруднику',
     11: 'Внутренняя проверка',
+    12: 'Внутренняя проверка',
+    13: 'Внутренняя проверка',
     14: 'Внутренняя проверка',
     15: 'Финальный анализ',
     20: '?',
     6: 'Одобрение',
   };
 
-  function getHistory() {
-    return JSON.parse(GM_getValue('status_history', '[]'));
+  // ─── Хранилище истории с привязкой к человеку ──────────────────────────
+
+  function getHistoryStore() {
+    let store;
+    try {
+      store = JSON.parse(GM_getValue(STORE_KEY, '{}'));
+    } catch (e) {
+      store = {};
+    }
+    if (!store || typeof store !== 'object' || Array.isArray(store)) store = {};
+    return store;
   }
 
-  function recordStatus(statusValue) {
-    const history = getHistory();
+  function saveHistoryStore(store) {
+    GM_setValue(STORE_KEY, JSON.stringify(store));
+  }
+
+  // Однократная миграция старой общей истории в отдельный бакет.
+  function migrateLegacyHistory() {
+    let legacyRaw;
+    try {
+      legacyRaw = GM_getValue(LEGACY_KEY, '');
+    } catch (e) {
+      legacyRaw = '';
+    }
+    if (!legacyRaw) return;
+    let legacyArr;
+    try {
+      legacyArr = JSON.parse(legacyRaw);
+    } catch (e) {
+      legacyArr = null;
+    }
+    if (Array.isArray(legacyArr) && legacyArr.length > 0) {
+      const store = getHistoryStore();
+      if (!store[LEGACY_BUCKET]) {
+        store[LEGACY_BUCKET] = legacyArr;
+        saveHistoryStore(store);
+      }
+    }
+    GM_setValue(LEGACY_KEY, ''); // больше не мигрируем
+  }
+
+  function getHistory(personKey) {
+    if (!personKey) return [];
+    const store = getHistoryStore();
+    const h = store[personKey];
+    return Array.isArray(h) ? h : [];
+  }
+
+  function recordStatus(personKey, statusValue) {
+    if (!personKey) personKey = '(неизвестно)';
+    const store = getHistoryStore();
+    const history = Array.isArray(store[personKey]) ? store[personKey] : [];
     if (history.length > 0 && history[history.length - 1].s === statusValue) return;
     history.push({ s: statusValue, t: Date.now() });
-    GM_setValue('status_history', JSON.stringify(history));
+    store[personKey] = history;
+    saveHistoryStore(store);
+  }
+
+  // ─── Определение человека по странице ──────────────────────────────────
+
+  function readFieldValue(el) {
+    if (!el) return null;
+    let v = (el.value || '').trim();
+    if (!v) v = (el.getAttribute && (el.getAttribute('data-return-value') || '').trim()) || '';
+    if (!v) {
+      const txt = (el.textContent || '').trim();
+      // не тащим простыни текста из контейнеров
+      if (txt && txt.length <= 120) v = txt;
+    }
+    return v || null;
+  }
+
+  function getById(root, id) {
+    if (!id) return null;
+    if (root.getElementById) return root.getElementById(id);
+    try {
+      return root.querySelector('#' + CSS.escape(id));
+    } catch (e) {
+      return null;
+    }
+  }
+
+  // Ищем значение поля по тексту его <label> — надёжнее, чем угадывать id.
+  function readByLabel(root, labelRe) {
+    const labels = root.querySelectorAll('label');
+    for (const lb of labels) {
+      if (!labelRe.test(lb.textContent || '')) continue;
+      const forId = lb.getAttribute('for');
+      const v = readFieldValue(getById(root, forId));
+      if (v) return v;
+    }
+    return null;
+  }
+
+  // Ищем значение поля по паттерну id (P<num>_<NAME>).
+  function readByIdPattern(root, idRe) {
+    const els = root.querySelectorAll('input[id^="P"], span[id^="P"], [id^="P"][data-return-value]');
+    for (const el of els) {
+      const id = el.id || '';
+      if (!/^P\d+_[A-Z0-9_]+$/i.test(id)) continue;
+      if (/_(CONTAINER|LABEL)$/i.test(id)) continue;
+      if (!idRe.test(id)) continue;
+      const v = readFieldValue(el);
+      if (v) return v;
+    }
+    return null;
+  }
+
+  function findField(root, labelRe, idRe) {
+    return readByLabel(root, labelRe) || readByIdPattern(root, idRe);
+  }
+
+  // Длиннейшее значение query-параметра — это и есть токен заявки.
+  function urlToken(href) {
+    try {
+      const u = new URL(href || location.href, location.origin);
+      const params = new URLSearchParams(u.search);
+      let longest = '';
+      for (const [, v] of params) {
+        if (v && v.length > longest.length) longest = v;
+      }
+      if (longest.length >= 8) return longest;
+      return u.pathname + u.search;
+    } catch (e) {
+      return href || location.pathname;
+    }
+  }
+
+  // Возвращает { key, label }: key — для хранилища, label — для показа.
+  function identifyPerson(root) {
+    root = root || document;
+    const nif = findField(root, /\bnif\b/i, /_NIF\b/i);
+    const titulo = findField(root, /t[íi]tulo/i, /_(TITULO|NR_TITULO|N_TITULO|NUM_TITULO|TITULO_RESID)/i);
+    const processo = findField(root, /processo/i, /_(PROCESSO|NR_PROCESSO|N_PROCESSO|NUM_PROCESSO)/i);
+    const pedido = findField(root, /n[.º\s]*do?\s*pedido|^pedido$/i, /_(NR_PEDIDO|N_PEDIDO|ID_PEDIDO|NUM_PEDIDO)/i);
+    const nome = findField(root, /\bnome\b/i, /_(NOME|NOME_COMPLETO|NM_CIDADAO)/i);
+
+    // Ключ — самый стабильный из доступных идентификаторов.
+    const key = nif || titulo || processo || pedido || nome || null;
+
+    // Метка — человекочитаемая: имя + короткий идентификатор для различения.
+    const idBit = titulo || processo || pedido || (nif ? 'NIF ' + nif : null);
+    let label = null;
+    if (nome && idBit) label = nome + ' · ' + idBit;
+    else if (nome) label = nome;
+    else if (idBit) label = idBit;
+
+    return { key, label };
+  }
+
+  function identifyPersonFromCard(cardBody) {
+    const cardItem = (cardBody.closest && cardBody.closest('.a-CardView-item')) || cardBody;
+    const titleEl = cardItem.querySelector(
+      '.a-CardView-title, .a-CardView-titleText, .a-CardView-mainContent'
+    );
+    const label = titleEl ? (titleEl.textContent || '').trim() : null;
+    const link = cardBody.querySelector('.a-CardView-subContent a');
+    const key = link ? urlToken(link.href) : null;
+    return { key, label: label || null };
+  }
+
+  // Сводит всё воедино: идентификационные поля → карточка → токен URL.
+  function resolvePerson(root, cardBody) {
+    const byFields = identifyPerson(root || document);
+    let key = byFields.key;
+    let label = byFields.label;
+
+    if ((!key || !label) && cardBody) {
+      const byCard = identifyPersonFromCard(cardBody);
+      if (!key) key = byCard.key;
+      if (!label) label = byCard.label;
+    }
+    if (!key) key = urlToken(location.href);
+    if (!label) label = key;
+    return { key, label };
   }
 
   function formatTimestamp(ts) {
@@ -88,8 +267,9 @@
       ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
-  function buildHistoryText(history) {
-    return history.map(entry => {
+  function buildHistoryText(history, personLabel) {
+    const head = personLabel ? (personLabel + ':\n') : '';
+    return head + history.map(entry => {
       const label = STATUS_LABELS[entry.s] || '?';
       return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
     }).join('\n');
@@ -128,29 +308,51 @@
     });
   }
 
-  function renderHistory(parentEl) {
-    const history = getHistory();
+  function renderHistory(parentEl, personKey, personLabel) {
+    const history = getHistory(personKey);
     const container = document.createElement('div');
     container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
+
     const header = document.createElement('div');
-    header.style.cssText = 'display:flex; align-items:center; margin-bottom:2px;';
+    header.style.cssText = 'display:flex; align-items:center; margin-bottom:2px; flex-wrap:wrap;';
     const title = document.createElement('span');
     title.textContent = history.length > 0 ? 'История изменений:' : 'Отладка:';
     title.style.fontWeight = 'bold';
     header.appendChild(title);
     if (history.length > 0) {
       header.appendChild(createIconBtn('📋', 'Копировать историю', (btn) => {
-        navigator.clipboard.writeText(buildHistoryText(history)).then(() => flashOk(btn, '📋'));
+        navigator.clipboard.writeText(buildHistoryText(history, personLabel)).then(() => flashOk(btn, '📋'));
       }));
     }
     header.appendChild(createDebugCopyButton());
     container.appendChild(header);
+
+    // Чья это история — показываем явно, чтобы не путать членов семьи.
+    if (personLabel) {
+      const who = document.createElement('div');
+      who.textContent = 'Заявитель: ' + personLabel;
+      who.style.cssText = 'font-style:italic; color:#555; margin-bottom:2px;';
+      container.appendChild(who);
+    }
+
     for (const entry of history) {
       const row = document.createElement('div');
       const label = STATUS_LABELS[entry.s] || '?';
       row.textContent = formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
       container.appendChild(row);
     }
+
+    // Если в хранилище есть другие заявители — короткая подсказка.
+    const store = getHistoryStore();
+    const others = Object.keys(store).filter(k => k !== personKey);
+    if (others.length > 0) {
+      const note = document.createElement('div');
+      note.style.cssText = 'margin-top:4px; color:#999;';
+      note.textContent = 'Также отслеживается заявителей: ' + others.length +
+        ' (история каждого видна на его странице).';
+      container.appendChild(note);
+    }
+
     parentEl.appendChild(container);
   }
 
@@ -264,7 +466,7 @@
     for (const code of STATUS_FLOW) {
       const row = document.createElement('div');
       const numSpan = document.createElement('span');
-      numSpan.textContent = String(code).padStart(2, '\u00a0');
+      numSpan.textContent = String(code).padStart(2, ' ');
       numSpan.style.cssText = 'font-family:monospace; margin-right:4px;';
       row.appendChild(numSpan);
 
@@ -284,7 +486,7 @@
 
     const note11 = document.createElement('div');
     note11.style.cssText = 'font-size:12px; color:#666; margin-bottom:8px; font-style:italic;';
-    note11.textContent = 'Статус 11 может появляться после 5 и иногда возвращаться.';
+    note11.textContent = 'Статусы 11–13 могут появляться после 5 и иногда возвращаться.';
     dialog.appendChild(note11);
 
     if (!STATUS_FLOW.includes(statusValue)) {
@@ -318,23 +520,30 @@
     dialog.appendChild(footer);
   }
 
-  // BUG: кнопка "?" вызывает уведомление от сайта:
-  // «Ocorreu 1 erro — A sua sessão terminou.»
-  // type="button" не помогает — APEX всё равно перехватывает.
-  // TODO: заменить <button> на <span> с role="button" и tabindex="0".
+  // Кнопка "?" — <span role="button">, а НЕ <button>: APEX перехватывает
+  // клик по <button> внутри формы как submit и роняет сессию
+  // («Ocorreu 1 erro — A sua sessão terminou.» + перезагрузка страницы).
   function createHelpButton(statusValue) {
-    const btn = document.createElement('button');
+    const btn = document.createElement('span');
     btn.textContent = '?';
     btn.title = 'Справка о статусах';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
     btn.style.cssText =
-      'cursor:pointer; border:none; background:#6c757d; color:#fff; border-radius:50%;' +
+      'display:inline-block; cursor:pointer; background:#6c757d; color:#fff; border-radius:50%;' +
       'width:20px; height:20px; font-size:12px; margin-left:6px; vertical-align:middle;' +
-      'line-height:20px; text-align:center; padding:0;';
+      'line-height:20px; text-align:center; padding:0; user-select:none;';
 
-    btn.addEventListener('click', () => {
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const dialog = getHelpDialog();
       fillHelpDialog(dialog, statusValue);
       dialog.showModal();
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') handler(e);
     });
 
     return btn;
@@ -365,14 +574,14 @@
     el.appendChild(createHelpButton(statusValue));
   }
 
-  function showError(el, message) {
+  function showError(el, message, personKey, personLabel) {
     el.textContent = '';
     el.style.color = '';
     const msg = document.createElement('div');
     msg.textContent = message;
     msg.style.color = '#dc3545';
     el.appendChild(msg);
-    renderHistory(el);
+    renderHistory(el, personKey, personLabel);
   }
 
   function collectBadgeInfo(cardBody) {
@@ -439,12 +648,17 @@
     note.textContent = 'После нажатия кнопка «Recibo» может перестать работать до перезагрузки страницы.';
     statusEl.appendChild(note);
 
-    renderHistory(statusEl);
+    // История человека из этой карточки (по токену ссылки/полям карточки).
+    const idlePerson = resolvePerson(document, cardBody);
+    renderHistory(statusEl, idlePerson.key, idlePerson.label);
   }
 
   async function loadStatus(statusEl, cardBody) {
     statusEl.textContent = 'Загрузка статуса…';
     statusEl.style.color = '#666';
+
+    // Резервная идентификация — на случай, если результат не получим.
+    const fallbackPerson = resolvePerson(document, cardBody);
 
     const debug = {
       ver: SCRIPT_VERSION,
@@ -455,6 +669,12 @@
       debug.estado = result ? describeEstadoEl(result.el) : null;
       debug.fallback = result ? !!result.fallback : null;
       if (result && result.fallback) debug.foundId = result.foundId;
+
+      // Человек определяется из того документа, где нашёлся статус.
+      const root = result && result.el ? (result.el.ownerDocument || document) : document;
+      const person = result ? resolvePerson(root, cardBody) : fallbackPerson;
+      debug.personKey = person.key;
+      debug.personLabel = person.label;
       logDebug(debug);
 
       if (!result) {
@@ -464,13 +684,13 @@
         msg.style.color = '#dc3545';
         appendReportCTA(msg);
         statusEl.appendChild(msg);
-        renderHistory(statusEl);
+        renderHistory(statusEl, person.key, person.label);
         return;
       }
       const val = Number(result.el.getAttribute('data-return-value'));
       updateStatusElement(statusEl, val);
-      recordStatus(val);
-      renderHistory(statusEl);
+      recordStatus(person.key, val);
+      renderHistory(statusEl, person.key, person.label);
       if (result.fallback) {
         const warn = document.createElement('div');
         warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
@@ -492,8 +712,9 @@
     const link = cardBody.querySelector('.a-CardView-subContent a');
     if (!link) {
       debug.source = 'no-link';
+      debug.personKey = fallbackPerson.key;
       logDebug(debug);
-      showError(statusEl, 'Ссылка на форму не найдена');
+      showError(statusEl, 'Ссылка на форму не найдена', fallbackPerson.key, fallbackPerson.label);
       return;
     }
 
@@ -513,8 +734,9 @@
       handleResult(findEstadoElement(doc));
     } catch (e) {
       debug.fetchError = String(e);
+      debug.personKey = fallbackPerson.key;
       logDebug(debug);
-      showError(statusEl, 'Ошибка загрузки: ' + e.message);
+      showError(statusEl, 'Ошибка загрузки: ' + e.message, fallbackPerson.key, fallbackPerson.label);
     }
   }
 
@@ -544,7 +766,8 @@
   // document-end — никакой fetch и никакой MutationObserver не нужны.
   function initValidacaoMode() {
     const result = findEstadoElement(document);
-    const debug = { ver: SCRIPT_VERSION, page: 'validacao' };
+    const person = resolvePerson(document, null);
+    const debug = { ver: SCRIPT_VERSION, page: 'validacao', personKey: person.key, personLabel: person.label };
     if (result) {
       debug.estado = describeEstadoEl(result.el);
       debug.fallback = !!result.fallback;
@@ -568,7 +791,7 @@
       container.appendChild(msg);
     } else {
       const val = Number(result.el.getAttribute('data-return-value'));
-      recordStatus(val);
+      recordStatus(person.key, val);
 
       const statusEl = document.createElement('div');
       updateStatusElement(statusEl, val);
@@ -585,9 +808,11 @@
       }
     }
 
-    renderHistory(container);
+    renderHistory(container, person.key, person.label);
     pedidoBody.appendChild(container);
   }
+
+  migrateLegacyHistory();
 
   const path = location.pathname;
   if (/\/validar(?:\/|$)/.test(path)) {
