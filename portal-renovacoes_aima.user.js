@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.9
+// @version      1.9.1
 // @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -25,7 +25,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.9';
+  const SCRIPT_VERSION = '1.9.1';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -128,7 +128,29 @@
     });
   }
 
-  function renderHistory(parentEl) {
+  const WIKI_URL = 'https://self-perfection.github.io/aima-renovacoes-wiki/';
+
+  function createWikiLink(text) {
+    const link = document.createElement('a');
+    link.href = WIKI_URL;
+    link.target = '_blank';
+    link.rel = 'noopener';
+    link.textContent = text;
+    link.style.cssText = 'color:#0d6efd; text-decoration:underline;';
+    return link;
+  }
+
+  function renderWikiLine(parentEl) {
+    const line = document.createElement('div');
+    line.style.cssText = 'margin-top:6px; font-size:12px;';
+    line.appendChild(document.createTextNode('📖 '));
+    line.appendChild(createWikiLink('Вики о продлении ВНЖ'));
+    line.appendChild(document.createTextNode(' — статусы, сроки, частые вопросы'));
+    parentEl.appendChild(line);
+  }
+
+  function renderFooter(parentEl) {
+    renderWikiLine(parentEl);
     const history = getHistory();
     const container = document.createElement('div');
     container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
@@ -295,6 +317,12 @@
       dialog.appendChild(note);
     }
 
+    const wikiBlock = document.createElement('div');
+    wikiBlock.style.cssText = 'margin-bottom:8px; padding:6px 8px; background:#e7f1ff; border-radius:4px;';
+    wikiBlock.appendChild(document.createTextNode('📖 Подробнее о процессе продления — в '));
+    wikiBlock.appendChild(createWikiLink('вики'));
+    dialog.appendChild(wikiBlock);
+
     const footer = document.createElement('div');
     footer.style.cssText = 'font-size:12px; color:#666; border-top:1px solid #eee; padding-top:8px; margin-top:4px;';
     const linkStyle = 'color:#0d6efd; text-decoration:underline;';
@@ -372,7 +400,7 @@
     msg.textContent = message;
     msg.style.color = '#dc3545';
     el.appendChild(msg);
-    renderHistory(el);
+    renderFooter(el);
   }
 
   function collectBadgeInfo(cardBody) {
@@ -439,7 +467,7 @@
     note.textContent = 'После нажатия кнопка «Recibo» может перестать работать до перезагрузки страницы.';
     statusEl.appendChild(note);
 
-    renderHistory(statusEl);
+    renderFooter(statusEl);
   }
 
   async function loadStatus(statusEl, cardBody) {
@@ -464,13 +492,13 @@
         msg.style.color = '#dc3545';
         appendReportCTA(msg);
         statusEl.appendChild(msg);
-        renderHistory(statusEl);
+        renderFooter(statusEl);
         return;
       }
       const val = Number(result.el.getAttribute('data-return-value'));
       updateStatusElement(statusEl, val);
       recordStatus(val);
-      renderHistory(statusEl);
+      renderFooter(statusEl);
       if (result.fallback) {
         const warn = document.createElement('div');
         warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
@@ -585,7 +613,7 @@
       }
     }
 
-    renderHistory(container);
+    renderFooter(container);
     pedidoBody.appendChild(container);
   }
 
