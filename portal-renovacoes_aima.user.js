@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.10
+// @version      1.11
 // @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -21,12 +21,13 @@
 // @changelog    1.8 - Статус грузится по кнопке «Узнать статус» (фикс конфликта с Recibo); debug-лог с кнопкой копирования
 // @changelog    1.9 - Поддержка страницы Validação (анонимный доступ, без fetch и без риска для сессии)
 // @changelog    1.10 - Добавлена ссылка на вики о продлении ВНЖ (под статусом и в справке)
+// @changelog    1.11 - Кнопка «?» больше не роняет сессию (button → span с role="button")
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.10';
+  const SCRIPT_VERSION = '1.11';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -347,23 +348,30 @@
     dialog.appendChild(footer);
   }
 
-  // BUG: кнопка "?" вызывает уведомление от сайта:
-  // «Ocorreu 1 erro — A sua sessão terminou.»
-  // type="button" не помогает — APEX всё равно перехватывает.
-  // TODO: заменить <button> на <span> с role="button" и tabindex="0".
+  // <span role="button">, а не <button>: APEX перехватывает клик по <button>
+  // внутри формы как submit и роняет сессию — «Ocorreu 1 erro — A sua sessão
+  // terminou.» с перезагрузкой страницы. type="button" не помогает.
   function createHelpButton(statusValue) {
-    const btn = document.createElement('button');
+    const btn = document.createElement('span');
     btn.textContent = '?';
     btn.title = 'Справка о статусах';
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
     btn.style.cssText =
-      'cursor:pointer; border:none; background:#6c757d; color:#fff; border-radius:50%;' +
+      'display:inline-block; cursor:pointer; background:#6c757d; color:#fff; border-radius:50%;' +
       'width:20px; height:20px; font-size:12px; margin-left:6px; vertical-align:middle;' +
-      'line-height:20px; text-align:center; padding:0;';
+      'line-height:20px; text-align:center; padding:0; user-select:none;';
 
-    btn.addEventListener('click', () => {
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
       const dialog = getHelpDialog();
       fillHelpDialog(dialog, statusValue);
       dialog.showModal();
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') handler(e);
     });
 
     return btn;
