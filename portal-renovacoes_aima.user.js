@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.13.3
+// @version      2.0
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице проверки по токену; в кабинете подсказывает, где его смотреть
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -24,12 +24,13 @@
 // @changelog    1.11 - Кнопка «?» больше не роняет сессию (button → span с role="button")
 // @changelog    1.12 - Коды статуса по вики сообщества: добавлены 3, 12, 13, 17-19 и коды 1xx, убран неподтверждённый код 1, справка переписана честнее
 // @changelog    1.13 - В кабинете больше не запрашиваем статус фоном (ломало «Recibo»): вместо кнопки «Узнать статус» — ссылка на страницу отслеживания, для одобренной заявки — ссылка про карту
+// @changelog    2.0 - Журнал статусов ведётся отдельно по каждому заявителю (для нескольких заявок из одного браузера); старый общий журнал переносится по кнопке
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.13.3';
+  const SCRIPT_VERSION = '2.0';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
