@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.13.1
+// @version      1.13.2
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице проверки по токену; в кабинете подсказывает, где его смотреть
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.13.1';
+  const SCRIPT_VERSION = '1.13.2';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -212,11 +212,30 @@
       ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
   }
 
+  const NEW_PEDIDO_MARK = '── новая заявка ──';
+
+  // Граница — только когда обе соседние записи знают свой номер заявки и он
+  // разный. Первая запись границей не является: до неё ничего не было. Пустой
+  // p означает «номер не прочитался», а не «другая заявка», поэтому переход
+  // null → номер границей тоже не считаем.
+  function startsNewPedido(history, i) {
+    if (i === 0) return false;
+    const prev = history[i - 1].p;
+    const cur = history[i].p;
+    return prev != null && cur != null && prev !== cur;
+  }
+
+  function historyRow(entry) {
+    return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + statusLabel(entry.s) + ')';
+  }
+
   function buildHistoryText(history) {
-    return history.map(entry => {
-      const label = statusLabel(entry.s);
-      return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
-    }).join('\n');
+    const lines = [];
+    history.forEach((entry, i) => {
+      if (startsNewPedido(history, i)) lines.push(NEW_PEDIDO_MARK);
+      lines.push(historyRow(entry));
+    });
+    return lines.join('\n');
   }
 
   // Используем <span role="button"> чтобы APEX не перехватывал клик как submit формы
@@ -293,12 +312,30 @@
     }
     header.appendChild(createDebugCopyButton());
     container.appendChild(header);
-    for (const entry of history) {
+    history.forEach((entry, i) => {
+      if (startsNewPedido(history, i)) {
+        const sep = document.createElement('div');
+        sep.textContent = NEW_PEDIDO_MARK;
+        sep.style.cssText = 'color:#999; margin:2px 0;';
+        container.appendChild(sep);
+      }
       const row = document.createElement('div');
-      const label = statusLabel(entry.s);
-      row.textContent = formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
+      row.textContent = historyRow(entry);
       container.appendChild(row);
+    });
+
+    // Подсказка, что журналы разных людей не смешались. Имя показывать незачем:
+    // человек и так смотрит на свою страницу.
+    const others = Object.keys(getHistoryStore()).filter(k => k !== personKeyValue).length;
+    if (others > 0) {
+      const note = document.createElement('div');
+      note.style.cssText = 'margin-top:4px; color:#999;';
+      note.textContent = others === 1
+        ? 'В этом браузере есть журнал ещё одного заявителя — он виден на его странице.'
+        : 'В этом браузере есть журналы ещё ' + others + ' заявителей — каждый виден на своей странице.';
+      container.appendChild(note);
     }
+
     parentEl.appendChild(container);
   }
 
