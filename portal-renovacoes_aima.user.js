@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.12
-// @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
+// @version      1.13
+// @description  Показывает числовой статус заявки на продление ВНЖ на странице проверки по токену; в кабинете подсказывает, где его смотреть
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/validar*
@@ -23,12 +23,13 @@
 // @changelog    1.10 - Добавлена ссылка на вики о продлении ВНЖ (под статусом и в справке)
 // @changelog    1.11 - Кнопка «?» больше не роняет сессию (button → span с role="button")
 // @changelog    1.12 - Коды статуса по вики сообщества: добавлены 3, 12, 13, 17-19 и коды 1xx, убран неподтверждённый код 1, справка переписана честнее
+// @changelog    1.13 - В кабинете больше не запрашиваем статус фоном (ломало «Recibo»): вместо кнопки «Узнать статус» — ссылка на страницу отслеживания, для одобренной заявки — ссылка про карту
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.12';
+  const SCRIPT_VERSION = '1.13';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -163,6 +164,7 @@
 
   const WIKI_URL = 'https://self-perfection.github.io/aima-renovacoes-wiki/';
   const STATUS_CODES_URL = WIKI_URL + 'process/etapy-zayavki/kod-statusa/';
+  const CARD_DELIVERY_URL = WIKI_URL + 'process/karta-i-dostavka/';
 
   function createWikiLink(text, url) {
     const link = document.createElement('a');
@@ -261,14 +263,6 @@
     parent.appendChild(self);
   }
 
-  function createStatusElement() {
-    const div = document.createElement('div');
-    div.className = 'a-CardView-subContent';
-    div.style.marginTop = '8px';
-    div.textContent = 'Загрузка статуса…';
-    div.style.color = '#666';
-    return div;
-  }
 
   let helpDialog = null;
 
@@ -427,30 +421,7 @@
     el.appendChild(createHelpButton(statusValue));
   }
 
-  function showError(el, message) {
-    el.textContent = '';
-    el.style.color = '';
-    const msg = document.createElement('div');
-    msg.textContent = message;
-    msg.style.color = '#dc3545';
-    el.appendChild(msg);
-    renderFooter(el);
-  }
 
-  function collectBadgeInfo(cardBody) {
-    const cardItem = cardBody.closest('.a-CardView-item');
-    const badgeEl = cardItem && cardItem.querySelector('.a-CardView-badge');
-    if (!badgeEl) return null;
-    const className = badgeEl.className || '';
-    const numMatch = className.match(/t-Badge--(\d+)/);
-    return {
-      className,
-      title: badgeEl.getAttribute('title') || null,
-      label: (badgeEl.querySelector('.a-CardView-badgeLabel') || {}).textContent || null,
-      value: (badgeEl.querySelector('.a-CardView-badgeValue') || {}).textContent || null,
-      num: numMatch ? Number(numMatch[1]) : null,
-    };
-  }
 
   function describeEstadoEl(el) {
     if (!el) return null;
@@ -461,141 +432,89 @@
     };
   }
 
-  function urlPath(href) {
-    try { return new URL(href).pathname; } catch (e) { return null; }
+
+  // Совет «следите за кодом статуса» осмыслен, только пока заявка в работе.
+  // По решённой заявке показываем то, что относится к ней, а не общий текст.
+  function cardOutcome(cardBody) {
+    const item = cardBody.closest('.a-CardView-item') || cardBody;
+    const badge = item.querySelector('.a-CardView-badgeValue');
+    const text = ((badge && badge.textContent) || '').toLowerCase();
+    // Порядок важен: «indeferido» содержит «deferido» как подстроку.
+    if (text.includes('indeferido')) return 'refused';
+    if (text.includes('deferido')) return 'approved';
+    return 'pending';
   }
 
-  function processCard(cardBody) {
-    const statusEl = createStatusElement();
-    cardBody.appendChild(statusEl);
-    renderIdle(statusEl, cardBody);
-  }
+  // На cidadao статус намеренно не показываем. Чтобы его получить, пришлось бы
+  // фоном запросить страницу заявки, а этот запрос ротирует APEX-сессию и ломает
+  // кнопку «Recibo». Вместо этого подсказываем открыть страницу по токену: там
+  // статус виден сразу, без входа в кабинет и без риска для сессии.
+  function annotateCard(cardBody) {
+    const outcome = cardOutcome(cardBody);
+    logDebug({ ver: SCRIPT_VERSION, page: 'cidadao', outcome });
 
-  // Исходное состояние: статус автоматически не тянем, чтобы фоновый fetch
-  // (с clear=72) не ломал APEX-сессию и не триггерил «A sua sessão terminou.»
-  // на кнопке Recibo. Пользователь сам жмёт «Узнать статус», когда готов.
-  function renderIdle(statusEl, cardBody) {
-    statusEl.textContent = '';
-    statusEl.style.color = '';
-
-    const btn = document.createElement('span');
-    btn.textContent = 'Узнать статус';
-    btn.setAttribute('role', 'button');
-    btn.setAttribute('tabindex', '0');
-    btn.style.cssText =
-      'display:inline-block; cursor:pointer; padding:4px 10px; border-radius:4px; ' +
-      'background:#0d6efd; color:#fff; font-weight:bold; font-size:14px; user-select:none;';
-    const activate = (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      loadStatus(statusEl, cardBody);
-    };
-    btn.addEventListener('click', activate);
-    btn.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') activate(e);
-    });
-    statusEl.appendChild(btn);
+    // Про отказ у сообщества проверенного материала нет — лучше промолчать,
+    // чем советовать наугад человеку, которому и так плохо.
+    if (outcome === 'refused') return;
 
     const note = document.createElement('div');
-    note.style.cssText = 'margin-top:4px; font-size:11px; color:#666;';
-    note.textContent = 'После нажатия кнопка «Recibo» может перестать работать до перезагрузки страницы.';
-    statusEl.appendChild(note);
+    note.style.cssText = 'margin-top:8px; padding:8px 10px; background:#e7f1ff; ' +
+      'border-radius:4px; font-size:12px; line-height:1.5;';
 
-    renderFooter(statusEl);
-  }
+    const head = document.createElement('div');
+    head.style.cssText = 'font-weight:bold; margin-bottom:2px;';
+    note.appendChild(head);
 
-  async function loadStatus(statusEl, cardBody) {
-    statusEl.textContent = 'Загрузка статуса…';
-    statusEl.style.color = '#666';
+    if (outcome === 'approved') {
+      head.textContent = '✅ Заявка одобрена — следить больше не за чем';
+      note.appendChild(document.createTextNode(
+        'Карту печатают и присылают почтой CTT. '));
+      note.appendChild(createWikiLink(
+        'Сроки, трек-номер и что делать при ошибке в данных карты', CARD_DELIVERY_URL));
+    } else {
+      head.textContent = '📌 Как следить за движением заявки';
 
-    const debug = {
-      ver: SCRIPT_VERSION,
-      badge: collectBadgeInfo(cardBody),
-    };
-
-    function handleResult(result) {
-      debug.estado = result ? describeEstadoEl(result.el) : null;
-      debug.fallback = result ? !!result.fallback : null;
-      if (result && result.fallback) debug.foundId = result.foundId;
-      logDebug(debug);
-
-      if (!result) {
-        statusEl.textContent = '';
-        const msg = document.createElement('div');
-        msg.textContent = 'Элемент статуса не найден. Расскажите об этом ';
-        msg.style.color = '#dc3545';
-        appendReportCTA(msg);
-        statusEl.appendChild(msg);
-        renderFooter(statusEl);
-        return;
+      // Даём свою подписанную ссылку, а не отсылаем «к ссылке выше»: там синим
+      // набран сам токен, и не всем очевидно, что по нему надо кликать.
+      const link = cardBody.querySelector('.a-CardView-subContent a');
+      if (link) {
+        const openLine = document.createElement('div');
+        openLine.style.cssText = 'margin:6px 0;';
+        const open = document.createElement('a');
+        open.href = link.href;
+        open.target = '_blank';
+        open.rel = 'noopener';
+        open.textContent = 'Открыть страницу с кодом статуса →';
+        open.style.cssText =
+          'display:inline-block; padding:5px 12px; border-radius:4px; background:#0d6efd; ' +
+          'color:#fff; font-weight:bold; text-decoration:none;';
+        openLine.appendChild(open);
+        note.appendChild(openLine);
       }
-      const val = Number(result.el.getAttribute('data-return-value'));
-      updateStatusElement(statusEl, val);
-      recordStatus(val);
-      renderFooter(statusEl);
-      if (result.fallback) {
-        const warn = document.createElement('div');
-        warn.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-top:4px; font-size:12px;';
-        warn.textContent = 'Найден нестандартный ID: ' + result.foundId + '. Расскажите об этом ';
-        appendReportCTA(warn);
-        statusEl.appendChild(warn);
-      }
+
+      note.appendChild(document.createTextNode(
+        'Сохраните её в закладки: потом достаточно открыть закладку и обновить страницу, ' +
+        'логиниться и вводить токен заново не нужно. Там виден числовой код статуса — он ' +
+        'меняется чаще словесного, поэтому по нему бывает заметно движение дела, когда ' +
+        'снаружи всё замерло. '));
+      note.appendChild(createWikiLink('Что означают коды', STATUS_CODES_URL));
     }
 
-    // Если элемент статуса уже есть в текущем документе — используем его,
-    // fetch не нужен, сессия не пострадает.
-    const localResult = findEstadoElement(document);
-    if (localResult) {
-      debug.source = 'local';
-      handleResult(localResult);
-      return;
-    }
-
-    const link = cardBody.querySelector('.a-CardView-subContent a');
-    if (!link) {
-      debug.source = 'no-link';
-      logDebug(debug);
-      showError(statusEl, 'Ссылка на форму не найдена');
-      return;
-    }
-
-    // Проверенный способ: запрашиваем validar как есть, включая clear=72.
-    // Это единственная найденная комбинация, при которой APEX отдаёт
-    // заполненный P72_ESTADO_1. Сторонний эффект — ротация сессии таба —
-    // пользователь принял явно, нажав на «Узнать статус».
-    debug.source = 'fetch';
-    debug.fetchPath = urlPath(link.href);
-
-    try {
-      const response = await fetch(link.href, { credentials: 'include' });
-      debug.fetchStatus = response.status;
-      debug.fetchFinalPath = urlPath(response.url);
-      const html = await response.text();
-      const doc = new DOMParser().parseFromString(html, 'text/html');
-      handleResult(findEstadoElement(doc));
-    } catch (e) {
-      debug.fetchError = String(e);
-      logDebug(debug);
-      showError(statusEl, 'Ошибка загрузки: ' + e.message);
-    }
+    const holder = cardBody.querySelector('.a-CardView-subContent') || cardBody;
+    holder.appendChild(note);
   }
 
   function initCidadaoMode() {
-    const processed = new WeakSet();
+    const annotated = new WeakSet();
 
-    // Наблюдаем за изменениями DOM для перехвата момента загрузки данных APEX
+    // Ждём, пока APEX отрисует карточку: ссылка с токеном — признак, что данные
+    // загрузились. Заявка у человека одна, поэтому после первой же отключаемся.
     const observer = new MutationObserver(() => {
-      const cards = document.querySelectorAll('.a-CardView-body');
-      for (const cardBody of cards) {
-        if (processed.has(cardBody)) continue;
-        // Ждём пока внутри карточки появится ссылка — признак загруженных данных
-        const link = cardBody.querySelector('.a-CardView-subContent a');
-        if (!link) continue;
-        processed.add(cardBody);
-        processCard(cardBody);
-      }
-      // Все карточки обработаны — observer больше не нужен
-      if (cards.length > 0 && [...cards].every(c => processed.has(c))) {
+      for (const cardBody of document.querySelectorAll('.a-CardView-body')) {
+        if (annotated.has(cardBody)) continue;
+        if (!cardBody.querySelector('.a-CardView-subContent a')) continue;
+        annotated.add(cardBody);
+        annotateCard(cardBody);
         observer.disconnect();
       }
     });
