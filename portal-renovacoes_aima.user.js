@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.11
+// @version      1.12
 // @description  Показывает числовой статус заявки на продление ВНЖ на страницах cidadao и validar
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -22,12 +22,13 @@
 // @changelog    1.9 - Поддержка страницы Validação (анонимный доступ, без fetch и без риска для сессии)
 // @changelog    1.10 - Добавлена ссылка на вики о продлении ВНЖ (под статусом и в справке)
 // @changelog    1.11 - Кнопка «?» больше не роняет сессию (button → span с role="button")
+// @changelog    1.12 - Коды статуса по вики сообщества: добавлены 3, 12, 13, 17-19 и коды 1xx, убран неподтверждённый код 1, справка переписана честнее
 // ==/UserScript==
 
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.11';
+  const SCRIPT_VERSION = '1.12';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -62,15 +63,45 @@
     };
   }
 
+  // Источник истины — вики сообщества, страница «Числовой код статуса»:
+  // https://self-perfection.github.io/aima-renovacoes-wiki/process/etapy-zayavki/kod-statusa/
+  // Правьте эту таблицу только вслед за вики, а не по отдельным сообщениям в чате.
+  //
+  // Официальной расшифровки кодов не существует. Кавычки в подписи означают, что
+  // трактовка пришла из чата и ничем не подкреплена; без кавычек — наблюдалось
+  // вместе со словесным статусом. Кода 1 здесь нет намеренно: его не наблюдал
+  // никто, он известен только по одному неподтверждённому сообщению.
   const STATUS_LABELS = {
-    1: 'Регистрация',
-    5: 'Заявка передана сотруднику',
-    11: 'Внутренняя проверка',
-    14: 'Внутренняя проверка',
-    15: 'Финальный анализ',
-    20: '?',
-    6: 'Одобрение',
+    // 0 — не статус заявки, а поле P3_TR_ESTADO («старая карта просрочена»).
+    // Держим здесь, чтобы не предлагать человеку сообщать о «неизвестном коде».
+    0: 'не статус заявки, а поле старой карты',
+    3: 'самое начало, до анализа',
+    5: '«заявка передана сотруднику»',
+    6: 'одобрено',
+    11: 'анализ',
+    12: 'значение не установлено',
+    13: 'значение не установлено',
+    14: 'анализ',
+    15: '«финальный анализ»',
+    17: 'значение не установлено',
+    18: 'открыт дозапрос',
+    19: 'дозапрос, письмо со списком следом',
+    20: 'ответ на дозапрос отправлен, ждёт анализа',
   };
+
+  // Коды вида 1xx — те же коды плюс сто (111 = 11, 114 = 14); в чате это
+  // проверили, сопоставив числа со словесными статусами.
+  function normalizeCode(code) {
+    return code > 100 ? code - 100 : code;
+  }
+
+  function statusLabel(code) {
+    return STATUS_LABELS[normalizeCode(code)] || 'код не встречался';
+  }
+
+  function isKnownCode(code) {
+    return normalizeCode(code) in STATUS_LABELS;
+  }
 
   function getHistory() {
     return JSON.parse(GM_getValue('status_history', '[]'));
@@ -92,7 +123,7 @@
 
   function buildHistoryText(history) {
     return history.map(entry => {
-      const label = STATUS_LABELS[entry.s] || '?';
+      const label = statusLabel(entry.s);
       return formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
     }).join('\n');
   }
@@ -131,10 +162,11 @@
   }
 
   const WIKI_URL = 'https://self-perfection.github.io/aima-renovacoes-wiki/';
+  const STATUS_CODES_URL = WIKI_URL + 'process/etapy-zayavki/kod-statusa/';
 
-  function createWikiLink(text) {
+  function createWikiLink(text, url) {
     const link = document.createElement('a');
-    link.href = WIKI_URL;
+    link.href = url || WIKI_URL;
     link.target = '_blank';
     link.rel = 'noopener';
     link.textContent = text;
@@ -171,7 +203,7 @@
     container.appendChild(header);
     for (const entry of history) {
       const row = document.createElement('div');
-      const label = STATUS_LABELS[entry.s] || '?';
+      const label = statusLabel(entry.s);
       row.textContent = formatTimestamp(entry.t) + ' — ' + entry.s + ' (' + label + ')';
       container.appendChild(row);
     }
@@ -238,9 +270,6 @@
     return div;
   }
 
-  // Типичная последовательность статусов
-  const STATUS_FLOW = [1, 5, 11, 14, 15, 20, 6];
-
   let helpDialog = null;
 
   function getHelpDialog() {
@@ -279,71 +308,64 @@
     dialog.appendChild(closeBtn);
 
     const title = document.createElement('div');
-    title.textContent = 'Типичная последовательность статусов:';
-    title.style.cssText = 'font-weight:bold; margin-bottom:8px;';
+    title.textContent = 'Код ' + statusValue + ' — ' + statusLabel(statusValue);
+    title.style.cssText = 'font-weight:bold; margin-bottom:8px; padding-right:24px;';
     dialog.appendChild(title);
 
-    const list = document.createElement('div');
-    list.style.cssText = 'margin-bottom:8px;';
-    for (const code of STATUS_FLOW) {
-      const row = document.createElement('div');
-      const numSpan = document.createElement('span');
-      numSpan.textContent = String(code).padStart(2, '\u00a0');
-      numSpan.style.cssText = 'font-family:monospace; margin-right:4px;';
-      row.appendChild(numSpan);
-
-      const labelSpan = document.createElement('span');
-      labelSpan.textContent = ' — ' + STATUS_LABELS[code];
-      row.appendChild(labelSpan);
-
-      if (code === statusValue) {
-        const marker = document.createElement('span');
-        marker.textContent = '  ◀ вы здесь';
-        marker.style.cssText = 'color:#0d6efd; font-weight:bold;';
-        row.appendChild(marker);
-      }
-      list.appendChild(row);
+    // Коды 1xx — то же самое плюс сто. Без пояснения человек решит, что у него
+    // какой-то свой особенный код.
+    if (normalizeCode(statusValue) !== statusValue) {
+      const note1xx = document.createElement('div');
+      note1xx.style.cssText = 'margin-bottom:8px;';
+      note1xx.textContent = 'Коды вида 1xx — те же коды плюс сто: ' + statusValue +
+        ' значит то же, что ' + normalizeCode(statusValue) + '.';
+      dialog.appendChild(note1xx);
     }
-    dialog.appendChild(list);
 
-    const note11 = document.createElement('div');
-    note11.style.cssText = 'font-size:12px; color:#666; margin-bottom:8px; font-style:italic;';
-    note11.textContent = 'Статус 11 может появляться после 5 и иногда возвращаться.';
-    dialog.appendChild(note11);
+    // Код 0 — известная ложная тревога: скрипт зацепил поле старой карты.
+    if (normalizeCode(statusValue) === 0) {
+      const note0 = document.createElement('div');
+      note0.style.cssText = 'margin-bottom:8px;';
+      note0.textContent = 'Код 0 со значением Expirado — это поле P3_TR_ESTADO: ' +
+        'оно говорит лишь о том, что просрочена ваша старая карта, что вы и так знаете. ' +
+        'К рассмотрению заявки отношения не имеет. Нужное поле оканчивается на _ESTADO_1 — ' +
+        'похоже, скрипт зацепил не то, расскажите об этом ';
+      appendReportCTA(note0);
+      dialog.appendChild(note0);
+    }
 
-    if (!STATUS_FLOW.includes(statusValue)) {
+    const disclaimer = document.createElement('div');
+    disclaimer.style.cssText =
+      'margin-bottom:8px; padding:6px 8px; background:#fff3cd; color:#856404; border-radius:4px;';
+    disclaimer.textContent = 'Официальной расшифровки кодов не существует — всё, что о них ' +
+      'известно, это наблюдения сообщества. Код полезен как признак жизни: что-то в системе ' +
+      'шевелится. Строить по нему прогноз сроков нельзя, повлиять на него тоже нельзя.';
+    dialog.appendChild(disclaimer);
+
+    const pattern = document.createElement('div');
+    pattern.style.cssText = 'margin-bottom:8px;';
+    pattern.textContent = 'Единственная закономерность, под которой есть случаи с датами: ' +
+      '14 → 15 нередко случается незадолго до одобрения, а после одобрения код становится 6. ' +
+      'И даже это не правило — 15 висит неделями, а одобрение приходило напрямую из 13.';
+    dialog.appendChild(pattern);
+
+    if (!isKnownCode(statusValue)) {
       const note = document.createElement('div');
       note.style.cssText = 'color:#856404; background:#fff3cd; padding:4px 8px; border-radius:4px; margin-bottom:8px;';
-      note.textContent = 'Ваш статус ' + statusValue + ' не входит в типичную последовательность. Расскажите об этом ';
+      note.textContent = 'Код ' + statusValue + ' сообществу ещё не встречался. Расскажите о нём ';
       appendReportCTA(note);
       dialog.appendChild(note);
     }
 
     const wikiBlock = document.createElement('div');
     wikiBlock.style.cssText = 'margin-bottom:8px; padding:6px 8px; background:#e7f1ff; border-radius:4px;';
-    wikiBlock.appendChild(document.createTextNode('📖 Подробнее о процессе продления — в '));
-    wikiBlock.appendChild(createWikiLink('вики'));
+    wikiBlock.appendChild(document.createTextNode('📖 Что известно про каждый код и откуда — '));
+    wikiBlock.appendChild(createWikiLink('в вики, со ссылками на источники', STATUS_CODES_URL));
     dialog.appendChild(wikiBlock);
 
     const footer = document.createElement('div');
     footer.style.cssText = 'font-size:12px; color:#666; border-top:1px solid #eee; padding-top:8px; margin-top:4px;';
-    const linkStyle = 'color:#0d6efd; text-decoration:underline;';
-    const sourceLink1 = document.createElement('a');
-    sourceLink1.href = 'https://t.me/aimairn/43114/134298';
-    sourceLink1.target = '_blank';
-    sourceLink1.textContent = 'Источник 1';
-    sourceLink1.style.cssText = linkStyle;
-    footer.appendChild(sourceLink1);
-    footer.appendChild(document.createTextNode(', '));
-    const sourceLink2 = document.createElement('a');
-    sourceLink2.href = 'https://t.me/aimairn/43114/136559';
-    sourceLink2.target = '_blank';
-    sourceLink2.textContent = 'Источник 2';
-    sourceLink2.style.cssText = linkStyle;
-    footer.appendChild(sourceLink2);
-    footer.appendChild(document.createElement('br'));
-
-    footer.appendChild(document.createTextNode('Если у вас нестандартный статус, расскажите '));
+    footer.appendChild(document.createTextNode('Заметили переход, которого нет в вики, — расскажите '));
     appendReportCTA(footer);
     dialog.appendChild(footer);
   }
@@ -378,19 +400,22 @@
   }
 
   function updateStatusElement(el, statusValue) {
-    const label = STATUS_LABELS[statusValue] || 'Неизвестный статус';
     el.textContent = '';
     el.style.color = '';
 
     const badge = document.createElement('span');
-    badge.textContent = statusValue + ' — ' + label;
+    badge.textContent = statusValue + ' — ' + statusLabel(statusValue);
     badge.style.cssText =
       'display:inline-block; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:14px;';
 
-    if (statusValue === 6) {
+    // Цветом отмечаем только то, что действительно что-то означает: одобрение и
+    // дозапрос (там нужны действия). Раскрашивать «чем больше число, тем ближе
+    // одобрение» нельзя — коды откатываются назад, это не шкала прогресса.
+    const code = normalizeCode(statusValue);
+    if (code === 6) {
       badge.style.background = '#d4edda';
       badge.style.color = '#155724';
-    } else if (statusValue >= 14) {
+    } else if (code === 18 || code === 19) {
       badge.style.background = '#fff3cd';
       badge.style.color = '#856404';
     } else {
