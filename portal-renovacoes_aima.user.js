@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.13
+// @version      1.13.1
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице проверки по токену; в кабинете подсказывает, где его смотреть
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.13';
+  const SCRIPT_VERSION = '1.13.1';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -48,6 +48,24 @@
     GM_setValue(DEBUG_LOG_KEY, JSON.stringify(log));
   }
 
+  // Настоящий номер заявки в экспорт не отдаём. Он короткий, последовательный
+  // и человек его знает — по нему выгрузку, вставленную в общий чат, сопоставят
+  // с автором, и обезличенный ключ журнала перестанет что-либо значить. Для
+  // отладки достаточно знать, что заявка сменилась, поэтому нумеруем по порядку.
+  function anonymizePedidoIds(store) {
+    const out = {};
+    for (const [key, history] of Object.entries(store)) {
+      const seen = [];
+      out[key] = history.map(entry => {
+        if (entry.p == null) return { ...entry, p: null };
+        let n = seen.indexOf(entry.p);
+        if (n < 0) n = seen.push(entry.p) - 1;
+        return { ...entry, p: n + 1 };
+      });
+    }
+    return out;
+  }
+
   function buildDebugPayload() {
     let debugLog;
     try {
@@ -59,7 +77,8 @@
       scriptVersion: SCRIPT_VERSION,
       exportedAt: new Date().toISOString(),
       userAgent: navigator.userAgent,
-      statusHistory: getHistory(),
+      // Соль сюда не кладём: без неё ключи не разворачиваются в NIE перебором.
+      statusHistory: anonymizePedidoIds(getHistoryStore()),
       debugLog,
     };
   }
@@ -104,15 +123,86 @@
     return normalizeCode(code) in STATUS_LABELS;
   }
 
-  function getHistory() {
-    return JSON.parse(GM_getValue('status_history', '[]'));
+  // ─── Журнал статусов, по заявителю ────────────────────────────────────
+  //
+  // Ключ — хеш от соли и NIE (Número de Identificação de Estrangeiro). NIE
+  // закреплён за человеком навсегда и не меняется при подаче и продлении, так
+  // что журнал переживает смену заявки; id заявки пишем атрибутом записи, чтобы
+  // было видно, где одна заявка сменила другую.
+  //
+  // Сам NIE не храним: он есть на открытой странице, ключ считается заново.
+  // Соль обязательна — NIE семизначный, голый хеш перебирается за секунду.
+  // Соль никогда не попадает в debug-экспорт (см. buildDebugPayload), поэтому
+  // ключи можно отдавать наружу как есть.
+  const STORE_KEY = 'status_history_v2';
+  const SALT_KEY = 'install_salt';
+  const NO_NIE_KEY = 'no-nie';
+
+  function getSalt() {
+    let salt = GM_getValue(SALT_KEY, '');
+    if (!salt) {
+      const bytes = new Uint8Array(16);
+      crypto.getRandomValues(bytes);
+      salt = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('');
+      GM_setValue(SALT_KEY, salt);
+    }
+    return salt;
   }
 
-  function recordStatus(statusValue) {
-    const history = getHistory();
-    if (history.length > 0 && history[history.length - 1].s === statusValue) return;
-    history.push({ s: statusValue, t: Date.now() });
-    GM_setValue('status_history', JSON.stringify(history));
+  async function personKey(nie) {
+    if (!nie) return NO_NIE_KEY;
+    const data = new TextEncoder().encode(getSalt() + ':' + nie);
+    const digest = await crypto.subtle.digest('SHA-256', data);
+    return [...new Uint8Array(digest)].slice(0, 8)
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function getHistoryStore() {
+    let store;
+    try {
+      store = JSON.parse(GM_getValue(STORE_KEY, '{}'));
+    } catch (e) {
+      store = {};
+    }
+    if (!store || typeof store !== 'object' || Array.isArray(store)) store = {};
+    return store;
+  }
+
+  function getHistory(key) {
+    const h = getHistoryStore()[key];
+    return Array.isArray(h) ? h : [];
+  }
+
+  function recordStatus(key, statusValue, pedidoId) {
+    const store = getHistoryStore();
+    const history = Array.isArray(store[key]) ? store[key] : [];
+    const last = history[history.length - 1];
+    // Тот же код по той же заявке — не дублируем. Смена заявки при том же коде
+    // это событие, его записываем.
+    if (last && last.s === statusValue && last.p === pedidoId) return;
+    history.push({ s: statusValue, t: Date.now(), p: pedidoId || null });
+    store[key] = history;
+    GM_setValue(STORE_KEY, JSON.stringify(store));
+  }
+
+  // Значение поля APEX по имени — на странице по токену так лежат NIE и id
+  // заявки. Номер страницы в id у разных людей разный (P72_…, P76_…), поэтому
+  // сначала пробуем ожидаемый id, потом ищем по шаблону — как findEstadoElement.
+  function fieldValue(expectedId, suffixRe) {
+    const byId = document.getElementById(expectedId);
+    const read = (el) => {
+      const v = el && (el.value || el.getAttribute('data-return-value'));
+      return (v && String(v).trim()) || null;
+    };
+    const direct = read(byId);
+    if (direct) return direct;
+    for (const el of document.querySelectorAll('[id]')) {
+      if (suffixRe.test(el.id)) {
+        const v = read(el);
+        if (v) return v;
+      }
+    }
+    return null;
   }
 
   function formatTimestamp(ts) {
@@ -185,9 +275,9 @@
     parentEl.appendChild(line);
   }
 
-  function renderFooter(parentEl) {
+  function renderFooter(parentEl, personKeyValue) {
     renderWikiLine(parentEl);
-    const history = getHistory();
+    const history = getHistory(personKeyValue);
     const container = document.createElement('div');
     container.style.cssText = 'margin-top:6px; font-size:12px; color:#666; line-height:1.5;';
     const header = document.createElement('div');
@@ -523,9 +613,15 @@
 
   // Validação рендерится анонимно и P72_ESTADO_1 уже лежит в DOM на момент
   // document-end — никакой fetch и никакой MutationObserver не нужны.
-  function initValidacaoMode() {
+  async function initValidacaoMode() {
     const result = findEstadoElement(document);
-    const debug = { ver: SCRIPT_VERSION, page: 'validacao' };
+
+    // NIE и id заявки лежат в этом же документе — идти за ними никуда не нужно.
+    const nie = fieldValue('P72_NIE', /^P\d+_NIE$/);
+    const pedidoId = fieldValue('P72_ID_1', /^P\d+_ID_1$/);
+    const key = await personKey(nie);
+
+    const debug = { ver: SCRIPT_VERSION, page: 'validacao', key, pedidoId, hasNie: !!nie };
     if (result) {
       debug.estado = describeEstadoEl(result.el);
       debug.fallback = !!result.fallback;
@@ -549,7 +645,7 @@
       container.appendChild(msg);
     } else {
       const val = Number(result.el.getAttribute('data-return-value'));
-      recordStatus(val);
+      recordStatus(key, val, pedidoId);
 
       const statusEl = document.createElement('div');
       updateStatusElement(statusEl, val);
@@ -566,7 +662,7 @@
       }
     }
 
-    renderFooter(container);
+    renderFooter(container, key);
     pedidoBody.appendChild(container);
   }
 
