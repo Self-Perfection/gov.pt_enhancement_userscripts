@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         AIMA Renovação Status Display
 // @namespace    https://github.com/Self-Perfection/gov.pt_enhancement_userscripts
-// @version      1.13.2
+// @version      1.13.3
 // @description  Показывает числовой статус заявки на продление ВНЖ на странице проверки по токену; в кабинете подсказывает, где его смотреть
 // @author       Self-Perfection
 // @match        https://portal-renovacoes.aima.gov.pt/ords/r/aima/aima-pr/cidadao*
@@ -29,7 +29,7 @@
 (function () {
   'use strict';
 
-  const SCRIPT_VERSION = '1.13.2';
+  const SCRIPT_VERSION = '1.13.3';
   const DEBUG_LOG_KEY = 'debug_log';
   const DEBUG_LOG_MAX_ENTRIES = 200;
 
@@ -136,6 +136,7 @@
   // ключи можно отдавать наружу как есть.
   const STORE_KEY = 'status_history_v2';
   const SALT_KEY = 'install_salt';
+  const LEGACY_KEY = 'status_history';
   const NO_NIE_KEY = 'no-nie';
 
   function getSalt() {
@@ -294,6 +295,112 @@
     parentEl.appendChild(line);
   }
 
+  // ─── Старый общий журнал ──────────────────────────────────────────────
+  //
+  // До перехода на журнал по заявителю история лежала одним списком на браузер.
+  // Автоматически привязать её к человеку нельзя: с новой версией скрипта
+  // первой может открыться страница любого члена семьи, и записи достанутся не
+  // тому. Поэтому показываем, что нашли, и решает пользователь.
+  function legacyHistory() {
+    let raw;
+    try {
+      raw = GM_getValue(LEGACY_KEY, '');
+    } catch (e) {
+      return [];
+    }
+    if (!raw) return [];
+    try {
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return [];
+      return arr.filter(e => e && typeof e.s === 'number' && typeof e.t === 'number');
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function clearLegacyHistory() {
+    // GM_deleteValue не запрошен в @grant, поэтому затираем пустой строкой.
+    GM_setValue(LEGACY_KEY, '');
+  }
+
+  function mergeHistories(older, newer) {
+    const all = [...older, ...newer].sort((a, b) => a.t - b.t);
+    const out = [];
+    for (const entry of all) {
+      const last = out[out.length - 1];
+      // Подряд идущий тот же код не дублируем. Неизвестный номер заявки
+      // считаем совпадающим с любым: в старых записях его просто не было.
+      const samePedido = !last || last.p == null || entry.p == null || last.p === entry.p;
+      if (last && last.s === entry.s && samePedido) continue;
+      out.push({ s: entry.s, t: entry.t, p: entry.p != null ? entry.p : null });
+    }
+    return out;
+  }
+
+  function createActionBtn(text, background, onClick) {
+    const btn = document.createElement('span');
+    btn.textContent = text;
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
+    btn.style.cssText =
+      'display:inline-block; cursor:pointer; padding:4px 10px; margin:4px 6px 0 0; ' +
+      'border-radius:4px; background:' + background + '; color:#fff; font-weight:bold; ' +
+      'user-select:none;';
+    const handler = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      onClick();
+    };
+    btn.addEventListener('click', handler);
+    btn.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') handler(e);
+    });
+    return btn;
+  }
+
+  function renderLegacyOffer(parentEl, personKeyValue) {
+    const legacy = legacyHistory();
+    if (legacy.length === 0) return;
+
+    const box = document.createElement('div');
+    box.style.cssText =
+      'margin-top:8px; padding:8px 10px; background:#fff3cd; color:#856404; ' +
+      'border-radius:4px; line-height:1.5;';
+
+    const head = document.createElement('div');
+    head.style.cssText = 'font-weight:bold; margin-bottom:2px;';
+    head.textContent = 'Осталась история от прежней версии';
+    box.appendChild(head);
+
+    const first = formatTimestamp(legacy[0].t);
+    const last = formatTimestamp(legacy[legacy.length - 1].t);
+    box.appendChild(document.createTextNode(
+      'Записей: ' + legacy.length + ', с ' + first + ' по ' + last + '. ' +
+      'Тогда журнал был общим на браузер, поэтому эти записи могут принадлежать ' +
+      'другому человеку — посмотрите и решите сами.'));
+
+    const preview = document.createElement('div');
+    preview.style.cssText = 'margin-top:4px; font-family:monospace; white-space:pre-line;';
+    preview.textContent = buildHistoryText(legacy);
+    box.appendChild(preview);
+
+    box.appendChild(createActionBtn('Это моя история', '#0d6efd', () => {
+      const store = getHistoryStore();
+      store[personKeyValue] = mergeHistories(legacy, getHistory(personKeyValue));
+      GM_setValue(STORE_KEY, JSON.stringify(store));
+      clearLegacyHistory();
+      location.reload();
+    }));
+
+    box.appendChild(createActionBtn('Удалить', '#6c757d', () => {
+      if (!confirm('Удалить старую историю? Записи (' + legacy.length + ' шт.) пропадут навсегда.')) return;
+      clearLegacyHistory();
+      location.reload();
+    }));
+
+    parentEl.appendChild(box);
+  }
+
   function renderFooter(parentEl, personKeyValue) {
     renderWikiLine(parentEl);
     const history = getHistory(personKeyValue);
@@ -323,6 +430,8 @@
       row.textContent = historyRow(entry);
       container.appendChild(row);
     });
+
+    renderLegacyOffer(container, personKeyValue);
 
     // Подсказка, что журналы разных людей не смешались. Имя показывать незачем:
     // человек и так смотрит на свою страницу.
